@@ -24,10 +24,16 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_password = get_password_hash(user.password)
-    user_data = user.model_dump()
-    user_data.pop("password")
-    user_in = schemas.UserCreate(**user_data, password_hash=hashed_password)
-    return crud.user.create(db, obj_in=user_in)
+    db_user = User(
+        username=user.username,
+        email=user.email,
+        display_name=user.display_name,
+        password_hash=hashed_password,
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
 
 
 @router.get("/", response_model=List[schemas.UserResponse])
@@ -60,6 +66,22 @@ def search_users(
         )
 
     return query.order_by(User.display_name.asc(), User.username.asc()).limit(limit).all()
+
+
+@router.get("/me", response_model=schemas.UserResponse)
+def read_current_user(current_user: User = Depends(get_current_user)):
+    """Get the authenticated user's profile."""
+    return current_user
+
+
+@router.put("/me", response_model=schemas.UserResponse)
+def update_current_user(
+    user_update: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update the authenticated user's profile."""
+    return crud.user.update(db, db_obj=current_user, obj_in=user_update)
 
 
 @router.get("/{user_id}", response_model=schemas.UserResponse)

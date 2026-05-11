@@ -452,7 +452,7 @@ class ProjectRole(Base):
     # Relationships
     project = relationship("Project", back_populates="project_roles")
     user = relationship("User", back_populates="project_roles")
-    permissions = relationship("Permission", secondary=role_permissions)
+    permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
 
 
 class Permission(Base):
@@ -510,3 +510,198 @@ class Favorite(Base):
     # Relationships
     user = relationship("User", back_populates="favorites")
     issue = relationship("Issue", back_populates="favorites")
+
+
+class Webhook(Base):
+    __tablename__ = "webhooks"
+
+    webhook_id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.project_id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    events: Mapped[str] = mapped_column(String(500), nullable=False)  # JSON array
+    secret: Mapped[Optional[str]] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project")
+    creator = relationship("User")
+
+
+class IssueTemplate(Base):
+    __tablename__ = "issue_templates"
+
+    template_id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.project_id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    issue_type_id: Mapped[int] = mapped_column(Integer, ForeignKey("issue_types.issue_type_id"), nullable=False)
+    summary_template: Mapped[Optional[str]] = mapped_column(String(500))
+    description_template: Mapped[Optional[str]] = mapped_column(Text)
+    priority_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("issue_priorities.priority_id"))
+    default_assignee: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.user_id"))
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project")
+    issue_type = relationship("IssueType")
+    priority = relationship("IssuePriority")
+    assignee = relationship("User", foreign_keys=[default_assignee])
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class Filter(Base):
+    __tablename__ = "filters"
+
+    filter_id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.project_id"))
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    jql_query: Mapped[str] = mapped_column(Text, nullable=False)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User")
+    project = relationship("Project")
+
+
+class Dashboard(Base):
+    __tablename__ = "dashboards"
+
+    dashboard_id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
+    layout_config: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User")
+    gadgets = relationship("DashboardGadget", back_populates="dashboard", cascade="all, delete-orphan")
+
+
+class DashboardGadget(Base):
+    __tablename__ = "dashboard_gadgets"
+
+    gadget_id: Mapped[int] = mapped_column(primary_key=True)
+    dashboard_id: Mapped[int] = mapped_column(Integer, ForeignKey("dashboards.dashboard_id", ondelete="CASCADE"), nullable=False)
+    gadget_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    config: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    position_x: Mapped[int] = mapped_column(Integer, default=0)
+    position_y: Mapped[int] = mapped_column(Integer, default=0)
+    width: Mapped[int] = mapped_column(Integer, default=4)
+    height: Mapped[int] = mapped_column(Integer, default=4)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Relationships
+    dashboard = relationship("Dashboard", back_populates="gadgets")
+
+
+class Roadmap(Base):
+    __tablename__ = "roadmaps"
+
+    roadmap_id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.project_id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    start_date: Mapped[Optional[date]] = mapped_column(Date)
+    end_date: Mapped[Optional[date]] = mapped_column(Date)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project")
+    creator = relationship("User")
+    items = relationship("RoadmapItem", back_populates="roadmap", cascade="all, delete-orphan")
+
+
+class RoadmapItem(Base):
+    __tablename__ = "roadmap_items"
+
+    item_id: Mapped[int] = mapped_column(primary_key=True)
+    roadmap_id: Mapped[int] = mapped_column(Integer, ForeignKey("roadmaps.roadmap_id", ondelete="CASCADE"), nullable=False)
+    issue_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("issues.issue_id"))
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="planned")
+    color_hex: Mapped[Optional[str]] = mapped_column(String(7))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Relationships
+    roadmap = relationship("Roadmap", back_populates="items")
+    issue = relationship("Issue")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    audit_id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.user_id"))
+    action_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    entity_id: Mapped[Optional[int]] = mapped_column(Integer)
+    old_values: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    new_values: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    user_agent: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Relationships
+    user = relationship("User")
+
+
+class BackgroundTask(Base):
+    __tablename__ = "background_tasks"
+
+    task_id: Mapped[int] = mapped_column(primary_key=True)
+    task_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    payload: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    result: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class EmailQueue(Base):
+    __tablename__ = "email_queue"
+
+    email_id: Mapped[int] = mapped_column(primary_key=True)
+    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    recipient_name: Mapped[Optional[str]] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    body_html: Mapped[Optional[str]] = mapped_column(Text)
+    body_text: Mapped[Optional[str]] = mapped_column(Text)
+    template_name: Mapped[Optional[str]] = mapped_column(String(100))
+    template_data: Mapped[Optional[str]] = mapped_column(Text)  # JSON
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class ApiRateLimit(Base):
+    __tablename__ = "api_rate_limits"
+
+    rate_limit_id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.user_id"))
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    endpoint: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, default=1)
+    window_start: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

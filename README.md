@@ -1,322 +1,266 @@
-# Jira Clone - Project Management System
+# ZYRAA - Project Management and Issue Tracking
 
-A full-stack Jira-like project management and issue tracking system built with **SQL Server**, **FastAPI** (Python), and **React/Next.js** (TypeScript).
+ZYRAA is a full-stack Jira-like project management system built with **FastAPI**, **SQL Server**, **SQLAlchemy**, **Next.js 14**, **TypeScript**, and **Tailwind CSS**.
 
-## Features
+It supports project and board management, issue tracking, sprint planning, roadmaps, dashboards, saved filters, attachments, notifications, permissions, audit logs, background tasks, and Docker-based deployment.
 
-- **Projects & Boards**: Create projects and Kanban/Scrum boards to organize work
-- **Issue Tracking**: Create, edit, and manage issues with types (Epic, Story, Task, Bug)
-- **Status Workflow**: Customizable workflow with statuses (To Do, In Progress, In Review, Done, Cancelled)
-- **Priority System**: 5-level priority system from Lowest to Highest
-- **Drag & Drop**: Intuitive board interface for moving issues between columns
-- **Comments & Worklogs**: Add comments and track time spent on issues
-- **User Management**: User registration, authentication via JWT tokens
-- **Labels & Components**: Categorize issues with labels and components
-- **Search**: Basic search functionality across issues
+## Current Features
+
+- **Authentication and users**: JWT login/register flow, current-user profile APIs, user search, and profile updates.
+- **Projects and boards**: Project CRUD, Kanban/Scrum boards, board columns, project stats, and board issue grouping.
+- **Issue tracking**: Issue CRUD, issue keys, priorities, statuses, assignees, labels, components, versions, epics, comments, worklogs, and issue links.
+- **Attachments**: Upload, list, download, and delete files linked to issues.
+- **Advanced search**: JQL-like issue search plus reusable filters and saved searches.
+- **Dashboards and gadgets**: Dashboard CRUD with configurable gadget blocks.
+- **Sprint planning**: Sprint creation, issue assignment to sprints, and capacity summaries by assignee.
+- **Roadmaps and Gantt views**: Roadmap CRUD, timeline items, issue-to-roadmap linking, and Gantt-style API output.
+- **Permissions and ACLs**: Project roles, seeded permission keys, role-permission assignments, and project admin role setup on project creation.
+- **Notifications and email queue**: In-app notifications, email queue records, and background task processing endpoints.
+- **Webhooks and templates**: Project webhooks, webhook test calls, and issue template CRUD.
+- **Bulk operations**: Bulk issue status updates, assignee changes, deletes, and label additions.
+- **Audit logging**: Audit records for important issue mutations with queryable audit endpoints.
+- **Rate limiting**: API middleware that tracks requests per IP and endpoint.
+- **Docker deployment**: Compose stack for SQL Server, Redis, backend, frontend, and nginx.
 
 ## Tech Stack
 
 ### Backend
-- **FastAPI**: High-performance web framework
-- **SQLAlchemy**: ORM for database operations
-- **SQL Server**: Primary database
-- **PyODBC**: SQL Server driver
-- **JWT**: Authentication tokens
-- **Alembic**: Database migrations (optional)
+
+- FastAPI
+- SQLAlchemy 2
+- SQL Server via PyODBC
+- Pydantic v2
+- JWT authentication
+- Uvicorn
 
 ### Frontend
-- **Next.js 14**: React framework with App Router
-- **TypeScript**: Type-safe JavaScript
-- **Tailwind CSS**: Utility-first CSS framework
-- **Heroicons**: Beautiful hand-crafted SVG icons
-- **Axios**: HTTP client
+
+- Next.js 14 App Router
+- React 18
+- TypeScript
+- Tailwind CSS
+- Axios
+- Heroicons
+
+### Infrastructure
+
+- Docker Compose
+- SQL Server 2022 container
+- Redis container
+- nginx reverse proxy
 
 ## Project Structure
 
-```
-Jira/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── v1/
-│   │   │   │   ├── auth.py
-│   │   │   │   ├── users.py
-│   │   │   │   ├── projects.py
-│   │   │   │   ├── issues.py
-│   │   │   │   └── boards.py
-│   │   │   └── __init__.py
-│   │   ├── crud/
-│   │   │   ├── base.py
-│   │   │   └── __init__.py
-│   │   ├── models/
-│   │   │   └── __init__.py
-│   │   ├── schemas/
-│   │   │   └── __init__.py
-│   │   ├── database.py
-│   │   ├── config.py
-│   │   ├── auth.py
-│   │   └── main.py
-│   ├── requirements.txt
-│   └── .env.example
-├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── layout.tsx
-│   │   │   ├── page.tsx
-│   │   │   ├── login/
-│   │   │   │   └── page.tsx
-│   │   │   ├── register/
-│   │   │   │   └── page.tsx
-│   │   │   ├── projects/
-│   │   │   │   ├── page.tsx
-│   │   │   │   ├── new/
-│   │   │   │   │   └── page.tsx
-│   │   │   │   └── [projectId]/
-│   │   │   │       └── page.tsx
-│   │   │   └── boards/
-│   │   │       └── [boardId]/
-│   │   │           └── page.tsx
-│   │   ├── components/
-│   │   │   ├── IssueCard.tsx
-│   │   │   ├── BoardColumn.tsx
-│   │   │   ├── IssueBoard.tsx
-│   │   │   └── IssueDetailModal.tsx
-│   │   ├── lib/
-│   │   │   ├── api.ts
-│   │   │   └── auth-context.tsx
-│   │   ├── styles/
-│   │   │   └── globals.css
-│   │   └── types/
-│   │       └── index.ts
-│   ├── public/
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── next.config.js
-│   └── tailwind.config.js
-├── database/
-│   └── schema.sql
-└── docs/
-    └── (to be added)
+```text
+Jyraa/
++-- backend/
+|   +-- app/
+|   |   +-- api/v1/
+|   |   |   +-- agents.py
+|   |   |   +-- audit.py
+|   |   |   +-- auth.py
+|   |   |   +-- boards.py
+|   |   |   +-- bulk.py
+|   |   |   +-- dashboards.py
+|   |   |   +-- filters.py
+|   |   |   +-- issues.py
+|   |   |   +-- notifications.py
+|   |   |   +-- permissions.py
+|   |   |   +-- projects.py
+|   |   |   +-- roadmaps.py
+|   |   |   +-- tasks.py
+|   |   |   +-- templates.py
+|   |   |   +-- users.py
+|   |   |   +-- webhooks.py
+|   |   +-- crud/
+|   |   +-- middleware/
+|   |   +-- models/
+|   |   +-- schemas/
+|   |   +-- services/
+|   |   +-- config.py
+|   |   +-- database.py
+|   |   +-- main.py
+|   +-- Dockerfile
+|   +-- requirements.txt
++-- database/
+|   +-- sample_data.sql
+|   +-- schema.sql
++-- docker/
+|   +-- docker-compose.yml
+|   +-- nginx.conf
++-- docs/
++-- frontend/
+|   +-- src/
+|   |   +-- app/
+|   |   |   +-- admin/
+|   |   |   +-- agents/
+|   |   |   +-- boards/
+|   |   |   +-- dashboards/
+|   |   |   +-- issues/
+|   |   |   +-- planning/
+|   |   |   +-- projects/
+|   |   |   +-- search/
+|   |   +-- components/
+|   |   +-- lib/
+|   |   +-- types/
+|   +-- package.json
+|   +-- tsconfig.json
++-- README.md
 ```
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.11 recommended
 - Node.js 18+
-- SQL Server (2019+) or Azure SQL Database
-- ODBC Driver 17 for SQL Server
+- SQL Server 2019+ or Docker
+- ODBC Driver 18 for SQL Server
 
-### 1. Database Setup
+### Backend
 
-Connect to your SQL Server instance and run the provided schema:
-
-```sql
--- Connect to your SQL Server
--- Create database
-CREATE DATABASE JiraDB;
-
-USE JiraDB;
-
--- Execute the schema from database/schema.sql
-```
-
-**Note**: The schema includes sample data for issue types, priorities, statuses, and resolutions.
-
-### 2. Backend Setup
-
-```bash
+```powershell
 cd backend
-
-# Create virtual environment
 python -m venv venv
-venv\Scripts\activate  # On Windows
-
-# Install dependencies
+.\venv\Scripts\activate
 pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your database credentials
-
-# Run the application
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at `http://localhost:8000`
-- Interactive docs: `http://localhost:8000/docs`
-- Alternative docs: `http://localhost:8000/redoc`
+The backend is available at:
 
-### 3. Frontend Setup
+- API root: `http://localhost:8000`
+- Swagger UI: `http://localhost:8000/docs`
+- OpenAPI schema: `http://localhost:8000/openapi.json`
 
-```bash
+### Frontend
+
+```powershell
 cd frontend
-
-# Install dependencies
 npm install
-
-# Configure environment (optional)
-# Create .env.local with NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
-
-# Run development server
 npm run dev
 ```
 
-Open `http://localhost:3000` in your browser.
+The frontend is available at `http://localhost:3000`.
 
-## API Endpoints
+### Docker Compose
 
-### Authentication
-- `POST /api/v1/auth/login` - Login
-- `POST /api/v1/auth/register` - Register new user
+```powershell
+cd docker
+docker compose up --build
+```
 
-### Users
-- `GET /api/v1/users/` - List users
-- `GET /api/v1/users/{user_id}` - Get user by ID
-- `PUT /api/v1/users/{user_id}` - Update user
+The Docker stack includes SQL Server, Redis, the FastAPI backend, the Next.js frontend, and nginx.
 
-### Projects
-- `GET /api/v1/projects/` - List projects
-- `POST /api/v1/projects/` - Create project
-- `GET /api/v1/projects/{project_id}` - Get project by ID
-- `PUT /api/v1/projects/{project_id}` - Update project
-- `GET /api/v1/projects/{project_id}/issues` - Get project issues
-- `GET /api/v1/projects/{project_id}/stats` - Get project statistics
+## Environment Variables
 
-### Issues
-- `GET /api/v1/issues/` - List issues (with filtering)
-- `POST /api/v1/issues/` - Create issue
-- `GET /api/v1/issues/{issue_id}` - Get issue by ID
-- `GET /api/v1/issues/key/{issue_key}` - Get issue by key
-- `PUT /api/v1/issues/{issue_id}` - Update issue
-- `DELETE /api/v1/issues/{issue_id}` - Delete issue
-- `POST /api/v1/issues/{issue_id}/comments` - Add comment
-- `GET /api/v1/issues/{issue_id}/comments` - Get comments
-- `POST /api/v1/issues/{issue_id}/worklogs` - Add worklog
-- `GET /api/v1/issues/{issue_id}/worklogs` - Get worklogs
-- `POST /api/v1/issues/{issue_id}/link` - Link issue to another
-
-### Boards
-- `GET /api/v1/boards/project/{project_id}` - Get project boards
-- `POST /api/v1/boards/` - Create board
-- `GET /api/v1/boards/{board_id}` - Get board by ID
-- `PUT /api/v1/boards/{board_id}` - Update board
-- `POST /api/v1/boards/{board_id}/columns` - Add column
-- `GET /api/v1/boards/{board_id}/columns` - Get columns
-- `GET /api/v1/boards/{board_id}/issues` - Get board issues grouped by column
-
-## Database Schema
-
-The database includes the following main tables:
-
-- **users**: User accounts
-- **projects**: Project definitions
-- **issues**: Core issue tracking
-- **issue_types**: Issue type definitions (Epic, Story, Task, Bug, Subtask)
-- **issue_statuses**: Issue statuses
-- **issue_priorities**: Priority levels
-- **issue_comments**: Comments on issues
-- **issue_attachments**: File attachments
-- **worklogs**: Time tracking entries
-- **boards**: Kanban/Scrum boards
-- **board_columns**: Board columns mapped to statuses
-- **sprints**: Scrum sprints
-- **issue_sprints**: Many-to-many relation
-- **components**: Project components
-- **versions**: Project versions/fixes
-- **labels**: Labels for categorization
-- **issue_labels**: Issue-label many-to-many
-- **project_roles**: User roles per project
-- **notifications**: User notifications
-- **issue_history**: Audit trail
-- **favorites**: User-favorite issues
-
-Refer to `database/schema.sql` for the complete schema with indexes, triggers, and stored procedures.
-
-## Key Concepts
-
-### Issue Flow
-1. An issue belongs to a **project** and has a unique key (e.g., `PROJ-123`)
-2. Issues have a **type** (Epic, Story, Task, Bug)
-3. Issues go through **statuses**: To Do → In Progress → In Review → Done/Cancelled
-4. Issues can be assigned to a **user** (assignee)
-5. Issues can have **priority**, **labels**, **components**, and **versions**
-6. Issues can be linked to other issues (blocks, duplicates, relates)
-
-### Boards
-- Boards are associated with a project
-- Each board has **columns** (typically mapped to issue statuses)
-- Issues appear in columns based on their status
-- Drag and drop moves issues between columns (updates status)
-- Two board types: **Kanban** (continuous flow) and **Scrum** (with sprints)
-
-### Authentication
-- JWT-based authentication
-- Include `Authorization: Bearer <token>` header in API requests
-- Tokens expire after 30 days (configurable)
-
-## Configuration
-
-### Backend Environment Variables (.env)
+### Backend
 
 ```environment
-DATABASE_SERVER=localhost,1433
+DATABASE_SERVER=mssql+pyodbc://@localhost\SQLEXPRESS02/JiraDB?driver=ODBC+Driver+18+for+SQL+Server&trusted_connection=yes&TrustServerCertificate=yes
 DATABASE_NAME=JiraDB
-DATABASE_USER=sa
-DATABASE_PASSWORD=YourStrong@Passw0rd
-SECRET_KEY=your-secret-jwt-key-change-in-production
+SECRET_KEY=change-this-secret-in-production
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=43200
 FRONTEND_URL=http://localhost:3000
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_SENDER_EMAIL=
+SMTP_USE_TLS=true
 ```
 
 ### Frontend
 
-- `NEXT_PUBLIC_API_URL`: Set to your backend URL (defaults to localhost:8000)
+```environment
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+```
 
-## Development
+## Frontend Routes
 
-### Running Both Services
+- `/` - workspace dashboard
+- `/projects` - project directory
+- `/projects/new` - create project
+- `/projects/[projectId]` - project detail, boards, stats, and issues
+- `/boards` - board directory
+- `/boards/[boardId]` - board execution view
+- `/issues/[issueId]` - issue detail, comments, worklogs, attachments, assignee, and epic link
+- `/search` - JQL-like search and saved filters
+- `/planning` - sprint capacity and roadmaps
+- `/dashboards` - dashboard and gadget management
+- `/admin` - ACLs, webhooks, templates, audit logs, and background tasks
+- `/agents` - agent workflow controls
+- `/login` and `/register` - authentication
 
-1. Start SQL Server (make sure JiraDB exists)
-2. Start backend: `cd backend && uvicorn app.main:app --reload`
-3. Start frontend: `cd frontend && npm run dev`
-4. Access at `http://localhost:3000`
+## API Summary
 
-### API Documentation
+All versioned API routes are mounted under `/api/v1`.
 
-Once backend is running, visit:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- `auth`: login and registration
+- `users`: user listing, profile, profile update, and search
+- `projects`: project CRUD, project issues, project stats
+- `boards`: board CRUD, columns, board issues, sprints, sprint capacity
+- `issues`: issue CRUD, comments, worklogs, links, epics, attachments, pagination, advanced search
+- `filters`: saved search CRUD
+- `dashboards`: dashboard and gadget CRUD
+- `roadmaps`: roadmap CRUD, roadmap items, Gantt data
+- `permissions`: permission list and project role assignment
+- `notifications`: notification list and mark-read actions
+- `webhooks`: webhook CRUD and test delivery
+- `templates`: issue template CRUD
+- `bulk`: bulk issue operations
+- `audit`: audit event listing
+- `tasks`: background task and email queue visibility
+- `agents`: AI/automation workflows
 
-## Current Limitations & Future Work
+## Database Notes
 
-- [ ] Email notifications
-- [ ] Advanced permission system (ACLs)
-- [ ] File attachments upload
-- [ ] Sprint planning with capacity
-- [ ] Roadmaps & Gantt charts
-- [ ] Advanced search (JQL-like)
-- [ ] Filters & saved searches
-- [ ] Dashboards & gadgets
-- [ ] Webhooks & integrations
-- [ ] REST API pagination
-- [ ] API rate limiting
-- [ ] Bulk operations
-- [ ] Issue templates
-- [ ] Audit logging enhancements
-- [ ] Background tasks (email, notifications)
-- [ ] Docker deployment configuration
+The SQL Server schema lives in `database/schema.sql`. It includes the core issue tracking tables plus advanced feature tables such as:
 
-## Contributing
+- `issue_attachments`
+- `project_roles`
+- `permissions`
+- `role_permissions`
+- `notifications`
+- `webhooks`
+- `issue_templates`
+- `filters`
+- `dashboards`
+- `dashboard_gadgets`
+- `roadmaps`
+- `roadmap_items`
+- `audit_log`
+- `api_rate_limits`
+- `email_queue`
+- `background_tasks`
 
-This is a learning/demo project. Feel free to fork and improve!
+For a brand-new database, the FastAPI startup flow can create ORM-managed tables with `Base.metadata.create_all`. For an existing database, apply schema changes manually or through migrations because `create_all` does not alter existing tables.
+
+## Verification
+
+The current implementation was checked with:
+
+```powershell
+python -m compileall backend\app
+python -c "from app.main import app; print('backend app import ok')"
+python -c "import app.models; from sqlalchemy.orm import configure_mappers; configure_mappers(); print('mappers ok')"
+cd frontend
+npm run type-check
+npm run build
+cd ..
+docker compose -f docker\docker-compose.yml config
+```
+
+The SQLAlchemy mapper validation may show existing overlap warnings for assignment/code-review relationships, but mapper configuration succeeds.
+
+## Additional Documentation
+
+- `docs/ADVANCED_IMPLEMENTATION_CHANGES.md` - detailed record of the advanced feature implementation.
+- `docs/SETUP.md` - additional setup notes.
+- `docs/BACKEND_DEBUG_SETUP.md` - backend debugging notes.
+- `docs/ZYRAA_Backend_Handbook.html` and `docs/ZYRAA_Backend_Handbook.pdf` - generated backend handbook.
 
 ## License
 
 MIT
-
-## Support
-
-For issues and feature requests, please open an issue on GitHub.

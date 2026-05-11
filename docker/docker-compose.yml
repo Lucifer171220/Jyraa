@@ -1,27 +1,96 @@
-version: '3.8'
-
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: jira-sqlserver
     environment:
       - ACCEPT_EULA=Y
-      - SA_PASSWORD=YourStrong@Passw0rd
+      - SA_PASSWORD=${MSSQL_SA_PASSWORD:-YourStrongPassw0rd!}
       - MSSQL_PID=Developer
     ports:
       - "1433:1433"
     volumes:
       - sqlserver_data:/var/opt/mssql
+      - ../database/schema.sql:/opt/schema.sql
     healthcheck:
-      test: ["CMD", "/opt/mssql-tools/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "YourStrong@Passw0rd", "-Q", "SELECT 1"]
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "${MSSQL_SA_PASSWORD:-YourStrongPassw0rd!}", "-C", "-Q", "SELECT 1"]
       interval: 10s
       timeout: 3s
       retries: 10
     networks:
       - jira-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: jira-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - jira-network
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: jira-backend
+    environment:
+      - DATABASE_SERVER=mssql+pyodbc://sa:${MSSQL_SA_PASSWORD:-YourStrongPassw0rd!}@sqlserver:1433/JiraDB?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes
+      - DATABASE_NAME=JiraDB
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ../uploads:/app/uploads
+    networks:
+      - jira-network
+
+  frontend:
+    image: node:20-alpine
+    container_name: jira-frontend
+    working_dir: /app
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - backend
+    networks:
+      - jira-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: jira-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - jira-network
+
 volumes:
   sqlserver_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

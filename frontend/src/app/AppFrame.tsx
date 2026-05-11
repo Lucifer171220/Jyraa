@@ -8,8 +8,12 @@ import {
   CpuChipIcon,
   FolderIcon,
   HomeModernIcon,
+  MagnifyingGlassIcon,
   PlusCircleIcon,
   RectangleGroupIcon,
+  ShieldCheckIcon,
+  Squares2X2Icon,
+  CalendarDaysIcon,
 } from '@heroicons/react/24/outline';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { BrandMark } from '@/components/BrandMark';
@@ -34,6 +38,30 @@ const navItems = [
     label: 'Boards',
     description: 'Execution views across active teams',
     icon: RectangleGroupIcon,
+  },
+  {
+    href: '/search',
+    label: 'Search',
+    description: 'JQL-like issue search and saved filters',
+    icon: MagnifyingGlassIcon,
+  },
+  {
+    href: '/planning',
+    label: 'Planning',
+    description: 'Sprints, capacity, roadmaps, and Gantt views',
+    icon: CalendarDaysIcon,
+  },
+  {
+    href: '/dashboards',
+    label: 'Dashboards',
+    description: 'Shared dashboards and operational gadgets',
+    icon: Squares2X2Icon,
+  },
+  {
+    href: '/admin',
+    label: 'Admin',
+    description: 'ACLs, webhooks, templates, audit, and tasks',
+    icon: ShieldCheckIcon,
   },
   {
     href: '/agents',
@@ -97,6 +125,38 @@ function getRouteMeta(pathname: string) {
       eyebrow: 'Board library',
       title: 'All boards',
       description: 'Jump between team boards without losing context or navigation momentum.',
+    };
+  }
+
+  if (pathname.startsWith('/search')) {
+    return {
+      eyebrow: 'Advanced search',
+      title: 'Search and filters',
+      description: 'Build JQL-like issue searches, save reusable filters, and move directly into matching work.',
+    };
+  }
+
+  if (pathname.startsWith('/planning')) {
+    return {
+      eyebrow: 'Planning room',
+      title: 'Sprints and roadmaps',
+      description: 'Shape sprint capacity, release roadmaps, and Gantt-style timelines from one planning surface.',
+    };
+  }
+
+  if (pathname.startsWith('/dashboards')) {
+    return {
+      eyebrow: 'Dashboard studio',
+      title: 'Dashboards and gadgets',
+      description: 'Create shared dashboard views and compose operational gadgets for team visibility.',
+    };
+  }
+
+  if (pathname.startsWith('/admin')) {
+    return {
+      eyebrow: 'Admin control room',
+      title: 'Security and integrations',
+      description: 'Manage ACLs, webhooks, templates, audit events, rate limits, and background tasks.',
     };
   }
 

@@ -4,8 +4,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeftIcon, PlusIcon } from '@heroicons/react/24/outline';
-import { Comment, Issue, User, Worklog } from '@/types';
-import { issueAPI, userAPI } from '@/lib/api';
+import { Attachment, Comment, Issue, User, Worklog } from '@/types';
+import { attachmentAPI, issueAPI, userAPI } from '@/lib/api';
 import { IssueComposerModal } from '@/components/IssueComposerModal';
 
 type IssueDetailPageProps = {
@@ -73,7 +73,8 @@ export function IssueDetailPage({ initialIssue, onIssueUpdated }: IssueDetailPag
   const [draft, setDraft] = useState<DraftState>(() => buildDraft(initialIssue));
   const [comments, setComments] = useState<Comment[]>([]);
   const [worklogs, setWorklogs] = useState<Worklog[]>([]);
-  const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'worklogs'>('details');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'worklogs' | 'attachments'>('details');
   const [assigneeQuery, setAssigneeQuery] = useState(initialIssue.assignee_username || '');
   const [selectedAssignee, setSelectedAssignee] = useState<User | null>(null);
   const [assigneeResults, setAssigneeResults] = useState<User[]>([]);
@@ -106,6 +107,7 @@ export function IssueDetailPage({ initialIssue, onIssueUpdated }: IssueDetailPag
   useEffect(() => {
     void fetchComments();
     void fetchWorklogs();
+    void fetchAttachments();
   }, [issue.issue_id]);
 
   useEffect(() => {
@@ -218,6 +220,55 @@ export function IssueDetailPage({ initialIssue, onIssueUpdated }: IssueDetailPag
       setWorklogs(res.data);
     } catch (fetchError) {
       console.error('Failed to fetch worklogs:', fetchError);
+    }
+  };
+
+  const fetchAttachments = async () => {
+    try {
+      const res = await attachmentAPI.getByIssue(issue.issue_id);
+      setAttachments(res.data as Attachment[]);
+    } catch (fetchError) {
+      console.error('Failed to fetch attachments:', fetchError);
+    }
+  };
+
+  const handleUploadAttachment = async (file?: File) => {
+    if (!file) return;
+    setIsSubmitting(true);
+    try {
+      await attachmentAPI.upload(issue.issue_id, file);
+      await fetchAttachments();
+      setActiveTab('attachments');
+    } catch (uploadError) {
+      console.error('Failed to upload attachment:', uploadError);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: number) => {
+    setIsSubmitting(true);
+    try {
+      await attachmentAPI.delete(attachmentId);
+      await fetchAttachments();
+    } catch (deleteError) {
+      console.error('Failed to delete attachment:', deleteError);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDownloadAttachment = async (attachment: Attachment) => {
+    try {
+      const response = await attachmentAPI.download(attachment.attachment_id);
+      const url = window.URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.filename;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      console.error('Failed to download attachment:', downloadError);
     }
   };
 
@@ -479,6 +530,7 @@ export function IssueDetailPage({ initialIssue, onIssueUpdated }: IssueDetailPag
                 <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'details' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('details')}>Activity overview</button>
                 <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'comments' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('comments')}>Comments ({comments.length})</button>
                 <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'worklogs' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('worklogs')}>Work log ({worklogs.length})</button>
+                <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'attachments' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('attachments')}>Attachments ({attachments.length})</button>
               </div>
             </div>
             <div className="p-5">
@@ -537,6 +589,54 @@ export function IssueDetailPage({ initialIssue, onIssueUpdated }: IssueDetailPag
                       {entry.comment ? <p className="mt-3 text-sm leading-7 text-slate-700">{entry.comment}</p> : null}
                     </div>
                   ))}
+                </div>
+              ) : null}
+
+              {activeTab === 'attachments' ? (
+                <div className="space-y-5">
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                    <label className="block text-sm font-semibold text-slate-900">Upload file</label>
+                    <input
+                      type="file"
+                      disabled={isSubmitting}
+                      onChange={(event) => void handleUploadAttachment(event.target.files?.[0])}
+                      className="mt-3 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                    />
+                    <p className="mt-2 text-xs text-slate-500">Files are stored by the backend and linked to this issue.</p>
+                  </div>
+
+                  {attachments.length === 0 ? (
+                    <div className="rounded-2xl border border-slate-200 px-4 py-6 text-center text-sm text-slate-500">
+                      No attachments yet.
+                    </div>
+                  ) : (
+                    attachments.map((attachment) => (
+                      <div key={attachment.attachment_id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{attachment.filename}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {(attachment.file_size / 1024).toFixed(1)} KB | {attachment.mime_type} | {formatDateTime(attachment.created_at)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadAttachment(attachment)}
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            Download
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteAttachment(attachment.attachment_id)}
+                            className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               ) : null}
             </div>

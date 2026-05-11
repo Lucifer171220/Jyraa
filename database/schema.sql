@@ -599,33 +599,234 @@ GO
 -- ============================================
 
 -- View: Issue Summary
-CREATE VIEW vw_IssueSummary AS
-SELECT
-    i.issue_id,
-    i.issue_key,
-    i.project_id,
-    p.project_key,
-    p.name as project_name,
-    i.issue_type_id,
-    it.name as issue_type,
-    i.summary,
-    ip.name as priority,
-    ip.color_hex as priority_color,
-    isn.name as status,
-    isn.color_hex as status_color,
-    i.assignee_user_id,
-    u.display_name as assignee_name,
-    r.display_name as reporter_name,
-    i.due_date,
-    i.created_at,
-    i.updated_at
-FROM issues i
-JOIN projects p ON i.project_id = p.project_id
-JOIN issue_types it ON i.issue_type_id = it.issue_type_id
-JOIN issue_statuses isn ON i.status_id = isn.status_id
-LEFT JOIN issue_priorities ip ON i.priority_id = ip.priority_id
-LEFT JOIN users u ON i.assignee_user_id = u.user_id
-LEFT JOIN users r ON i.reporter_user_id = r.user_id;
+-- ============================================
+-- WEBHOOKS TABLE
+-- ============================================
+CREATE TABLE webhooks (
+    webhook_id INT PRIMARY KEY IDENTITY(1,1),
+    project_id INT NOT NULL,
+    name NVARCHAR(200) NOT NULL,
+    url NVARCHAR(1000) NOT NULL,
+    events NVARCHAR(500) NOT NULL, -- comma-separated: 'issue_created', 'issue_updated', etc.
+    secret NVARCHAR(255) NULL,
+    is_active BIT DEFAULT 1,
+    created_by INT NOT NULL,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    updated_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_webhooks_project FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+    CONSTRAINT fk_webhooks_creator FOREIGN KEY (created_by) REFERENCES users(user_id)
+);
 GO
 
-PRINT 'Database schema created successfully!';
+CREATE INDEX idx_webhooks_project ON webhooks(project_id);
+GO
+
+-- ============================================
+-- ISSUE TEMPLATES TABLE
+-- ============================================
+CREATE TABLE issue_templates (
+    template_id INT PRIMARY KEY IDENTITY(1,1),
+    project_id INT NULL,
+    name NVARCHAR(200) NOT NULL,
+    issue_type_id INT NOT NULL,
+    summary_template NVARCHAR(500) NULL,
+    description_template NVARCHAR(MAX) NULL,
+    priority_id INT NULL,
+    default_assignee INT NULL,
+    is_global BIT DEFAULT 0,
+    created_by INT NOT NULL,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    updated_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_templates_project FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+    CONSTRAINT fk_templates_type FOREIGN KEY (issue_type_id) REFERENCES issue_types(issue_type_id),
+    CONSTRAINT fk_templates_priority FOREIGN KEY (priority_id) REFERENCES issue_priorities(priority_id),
+    CONSTRAINT fk_templates_creator FOREIGN KEY (created_by) REFERENCES users(user_id)
+);
+GO
+
+CREATE INDEX idx_templates_project ON issue_templates(project_id);
+GO
+
+-- ============================================
+-- FILTERS TABLE (Saved Searches)
+-- ============================================
+CREATE TABLE filters (
+    filter_id INT PRIMARY KEY IDENTITY(1,1),
+    user_id INT NOT NULL,
+    project_id INT NULL,
+    name NVARCHAR(200) NOT NULL,
+    jql_query NVARCHAR(MAX) NOT NULL,
+    is_favorite BIT DEFAULT 0,
+    is_shared BIT DEFAULT 0,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    updated_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_filters_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_filters_project FOREIGN KEY (project_id) REFERENCES projects(project_id)
+);
+GO
+
+CREATE INDEX idx_filters_user ON filters(user_id);
+GO
+
+-- ============================================
+-- DASHBOARDS TABLE
+-- ============================================
+CREATE TABLE dashboards (
+    dashboard_id INT PRIMARY KEY IDENTITY(1,1),
+    user_id INT NOT NULL,
+    name NVARCHAR(200) NOT NULL,
+    description NVARCHAR(MAX) NULL,
+    is_shared BIT DEFAULT 0,
+    layout_config NVARCHAR(MAX) NULL, -- JSON layout configuration
+    created_at DATETIME2 DEFAULT GETDATE(),
+    updated_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_dashboards_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+GO
+
+CREATE INDEX idx_dashboards_user ON dashboards(user_id);
+GO
+
+-- ============================================
+-- DASHBOARD GADGETS TABLE
+-- ============================================
+CREATE TABLE dashboard_gadgets (
+    gadget_id INT PRIMARY KEY IDENTITY(1,1),
+    dashboard_id INT NOT NULL,
+    gadget_type NVARCHAR(100) NOT NULL, -- 'filter_results', 'created_vs_resolved', 'assignee_workload', etc.
+    title NVARCHAR(200) NOT NULL,
+    config NVARCHAR(MAX) NULL, -- JSON configuration
+    position_x INT DEFAULT 0,
+    position_y INT DEFAULT 0,
+    width INT DEFAULT 4,
+    height INT DEFAULT 4,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_gadgets_dashboard FOREIGN KEY (dashboard_id) REFERENCES dashboards(dashboard_id) ON DELETE CASCADE
+);
+GO
+
+-- ============================================
+-- ROADMAPS TABLE
+-- ============================================
+CREATE TABLE roadmaps (
+    roadmap_id INT PRIMARY KEY IDENTITY(1,1),
+    project_id INT NOT NULL,
+    name NVARCHAR(200) NOT NULL,
+    description NVARCHAR(MAX) NULL,
+    start_date DATE NULL,
+    end_date DATE NULL,
+    created_by INT NOT NULL,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    updated_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_roadmaps_project FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+    CONSTRAINT fk_roadmaps_creator FOREIGN KEY (created_by) REFERENCES users(user_id)
+);
+GO
+
+-- ============================================
+-- ROADMAP ITEMS TABLE
+-- ============================================
+CREATE TABLE roadmap_items (
+    item_id INT PRIMARY KEY IDENTITY(1,1),
+    roadmap_id INT NOT NULL,
+    issue_id INT NULL, -- Optional link to existing issue
+    name NVARCHAR(500) NOT NULL,
+    description NVARCHAR(MAX) NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    status NVARCHAR(50) DEFAULT 'planned', -- planned, in_progress, completed
+    color_hex NVARCHAR(7) NULL,
+    sort_order INT DEFAULT 0,
+    CONSTRAINT fk_roadmap_items_roadmap FOREIGN KEY (roadmap_id) REFERENCES roadmaps(roadmap_id) ON DELETE CASCADE,
+    CONSTRAINT fk_roadmap_items_issue FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
+);
+GO
+
+-- ============================================
+-- AUDIT LOG TABLE (Enhanced)
+-- ============================================
+CREATE TABLE audit_log (
+    audit_id INT PRIMARY KEY IDENTITY(1,1),
+    user_id INT NULL,
+    action_type NVARCHAR(100) NOT NULL, -- 'create', 'update', 'delete', 'login', 'logout', etc.
+    entity_type NVARCHAR(100) NOT NULL, -- 'issue', 'project', 'user', etc.
+    entity_id INT NULL,
+    old_values NVARCHAR(MAX) NULL, -- JSON of old values
+    new_values NVARCHAR(MAX) NULL, -- JSON of new values
+    ip_address NVARCHAR(45) NULL,
+    user_agent NVARCHAR(MAX) NULL,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+GO
+
+CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id);
+GO
+CREATE INDEX idx_audit_user ON audit_log(user_id);
+GO
+
+-- ============================================
+-- API RATE LIMITING TABLE
+-- ============================================
+CREATE TABLE api_rate_limits (
+    rate_limit_id INT PRIMARY KEY IDENTITY(1,1),
+    user_id INT NULL,
+    ip_address NVARCHAR(45) NULL,
+    endpoint NVARCHAR(200) NOT NULL,
+    request_count INT DEFAULT 1,
+    window_start DATETIME2 DEFAULT GETDATE(),
+    UNIQUE(user_id, ip_address, endpoint, window_start)
+);
+GO
+
+-- ============================================
+-- EMAIL QUEUE TABLE
+-- ============================================
+CREATE TABLE email_queue (
+    email_id INT PRIMARY KEY IDENTITY(1,1),
+    recipient_email NVARCHAR(255) NOT NULL,
+    recipient_name NVARCHAR(200) NULL,
+    subject NVARCHAR(500) NOT NULL,
+    body_html NVARCHAR(MAX) NULL,
+    body_text NVARCHAR(MAX) NULL,
+    template_name NVARCHAR(100) NULL,
+    template_data NVARCHAR(MAX) NULL, -- JSON data for template
+    status NVARCHAR(50) DEFAULT 'pending', -- pending, sent, failed
+    error_message NVARCHAR(MAX) NULL,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    sent_at DATETIME2 NULL
+);
+GO
+
+-- ============================================
+-- BACKGROUND TASKS TABLE
+-- ============================================
+CREATE TABLE background_tasks (
+    task_id INT PRIMARY KEY IDENTITY(1,1),
+    task_type NVARCHAR(100) NOT NULL, -- 'email', 'notification', 'export', etc.
+    status NVARCHAR(50) NOT NULL DEFAULT 'pending', -- pending, processing, completed, failed
+    priority INT DEFAULT 0,
+    payload NVARCHAR(MAX) NULL, -- JSON payload
+    result NVARCHAR(MAX) NULL, -- JSON result
+    error_message NVARCHAR(MAX) NULL,
+    created_at DATETIME2 DEFAULT GETDATE(),
+    started_at DATETIME2 NULL,
+    completed_at DATETIME2 NULL
+);
+GO
+
+CREATE INDEX idx_background_tasks_status ON background_tasks(status);
+GO
+
+-- Trigger for updated_at on new tables
+CREATE TRIGGER trg_dashboards_updated
+ON dashboards
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dashboards SET updated_at = GETDATE() WHERE dashboard_id IN (SELECT dashboard_id FROM inserted);
+END;
+GO
+
+PRINT 'Database schema updated with new features!';

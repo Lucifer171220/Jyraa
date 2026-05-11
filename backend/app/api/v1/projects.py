@@ -30,6 +30,22 @@ def create_project(
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
+    from app.services.permission_service import add_role_permission, assign_project_role
+
+    role = assign_project_role(db, user_id=current_user.user_id, project_id=db_project.project_id, role_type="admin")
+    for permission_key in (
+        "project.admin",
+        "project.read",
+        "issue.create",
+        "issue.update",
+        "issue.delete",
+        "sprint.manage",
+        "roadmap.manage",
+        "webhook.manage",
+        "template.manage",
+        "dashboard.manage",
+    ):
+        add_role_permission(db, role.role_id, permission_key)
     return db_project
 
 

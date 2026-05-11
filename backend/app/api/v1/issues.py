@@ -1,7 +1,8 @@
 import re
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud, schemas
@@ -22,6 +23,7 @@ from app.models import (
 )
 from app.services.agent_service import recommend_issue_assignee
 from app.services.code_analyzer import analyze_code_from_github, create_bugs_from_findings
+from app.services.jql_service import search_issues
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -142,6 +144,48 @@ def serialize_worklog(worklog: Worklog) -> dict:
     }
 
 
+def queue_issue_assignment(issue: Issue) -> None:
+    if not issue.assignee:
+        return
+    try:
+        from app.services.task_processor import enqueue_email, enqueue_notification
+
+        title = f"{issue.issue_key} assigned to you"
+        message = f"You were assigned: {issue.summary}"
+        enqueue_notification(issue.assignee.user_id, "issue_assigned", title, message, issue.issue_id)
+        enqueue_email(
+            recipient_email=issue.assignee.email,
+            recipient_name=issue.assignee.display_name,
+            subject=f"[ZYRAA] Issue Assigned: {issue.issue_key}",
+            body_text=(
+                f"Hello {issue.assignee.display_name},\n\n"
+                f"You have been assigned {issue.issue_key}: {issue.summary}\n\n"
+                f"Project: {issue.project.name if issue.project else issue.project_key}\n"
+            ),
+            template_name="issue_assigned",
+            template_data={"issue_id": issue.issue_id, "issue_key": issue.issue_key},
+        )
+    except Exception:
+        # Notification failures should not block issue mutations.
+        return
+
+
+def write_audit(db: Session, user: User, action: str, entity: str, entity_id: int | None, values: dict | None = None) -> None:
+    try:
+        from app.middleware.audit import log_audit_event
+
+        log_audit_event(
+            db,
+            action_type=action,
+            entity_type=entity,
+            entity_id=entity_id,
+            new_values=values,
+            user_id=user.user_id,
+        )
+    except Exception:
+        db.rollback()
+
+
 @router.post("/", response_model=schemas.IssueDetailResponse, status_code=status.HTTP_201_CREATED)
 def create_issue(
     issue: schemas.IssueCreate,
@@ -241,6 +285,8 @@ def create_issue(
             db.commit()
             db.refresh(db_issue)
 
+    queue_issue_assignment(db_issue)
+    write_audit(db, current_user, "create", "issue", db_issue.issue_id, {"issue_key": db_issue.issue_key})
     return serialize_issue(db_issue, recommendation_payload)
 
 
@@ -298,6 +344,40 @@ def read_issues(
     return [serialize_issue(issue) for issue in issues]
 
 
+@router.get("/paginated", response_model=schemas.PaginatedResponse)
+def read_issues_paginated(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    project_key: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = db.query(Issue)
+    if project_key:
+        project = crud.project.get_by_key(db, project_key=project_key)
+        query = query.filter(Issue.project_id == project.project_id) if project else query.filter(False)
+    if search:
+        like = f"%{search}%"
+        query = query.filter((Issue.summary.ilike(like)) | (Issue.issue_key.ilike(like)) | (Issue.description.ilike(like)))
+
+    total = query.count()
+    issues = query.order_by(Issue.issue_id.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    return {"total": total, "page": page, "page_size": page_size, "items": [serialize_issue(issue) for issue in issues]}
+
+
+@router.get("/search", response_model=schemas.PaginatedResponse)
+def advanced_search_issues(
+    jql: str = "",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    total, issues = search_issues(jql, db, limit=page_size, offset=(page - 1) * page_size)
+    return {"total": total, "page": page, "page_size": page_size, "items": [serialize_issue(issue) for issue in issues]}
+
+
 @router.get("/{issue_id}", response_model=schemas.IssueDetailResponse)
 def read_issue(issue_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     db_issue = db.query(Issue).filter(Issue.issue_id == issue_id).first()
@@ -325,6 +405,7 @@ def update_issue(
     if db_issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
+    old_assignee_user_id = db_issue.assignee_user_id
     update_data = issue_update.model_dump(exclude_unset=True)
     target_project_id = db_issue.project_id
 
@@ -405,6 +486,9 @@ def update_issue(
 
     db.commit()
     db.refresh(db_issue)
+    if db_issue.assignee_user_id and db_issue.assignee_user_id != old_assignee_user_id:
+        queue_issue_assignment(db_issue)
+    write_audit(db, current_user, "update", "issue", db_issue.issue_id, update_data)
     return serialize_issue(db_issue)
 
 
@@ -415,6 +499,7 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db), current_user: Use
         raise HTTPException(status_code=404, detail="Issue not found")
     db.delete(db_issue)
     db.commit()
+    write_audit(db, current_user, "delete", "issue", issue_id, {"issue_id": issue_id})
     return None
 
 
@@ -433,6 +518,20 @@ def create_comment(
     db.add(db_comment)
     db.commit()
     db.refresh(db_comment)
+    if db_issue.assignee_user_id and db_issue.assignee_user_id != current_user.user_id:
+        try:
+            from app.services.task_processor import enqueue_notification
+
+            enqueue_notification(
+                db_issue.assignee_user_id,
+                "issue_comment",
+                f"New comment on {db_issue.issue_key}",
+                comment.body[:500],
+                db_issue.issue_id,
+            )
+        except Exception:
+            pass
+    write_audit(db, current_user, "comment", "issue", issue_id, {"comment_id": db_comment.comment_id})
     return serialize_comment(db_comment)
 
 
@@ -602,3 +701,87 @@ def link_pull_request(
         "findings_count": len(findings),
         "bugs_created": len(bugs),
     }
+
+
+@router.post("/{issue_id}/attachments", status_code=status.HTTP_201_CREATED)
+def upload_attachment(
+    issue_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.attachment_service import create_attachment, save_upload_file
+
+    db_issue = crud.issue.get(db, issue_id)
+    if db_issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    try:
+        attachment = create_attachment(db, issue_id, current_user.user_id, file)
+        return {
+            "attachment_id": attachment.attachment_id,
+            "filename": attachment.filename,
+            "file_size": attachment.file_size,
+            "mime_type": attachment.mime_type,
+            "created_at": attachment.created_at,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+
+
+@router.get("/{issue_id}/attachments", response_model=List[dict])
+def get_attachments(
+    issue_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.attachment_service import get_issue_attachments
+
+    db_issue = crud.issue.get(db, issue_id)
+    if db_issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    attachments = get_issue_attachments(db, issue_id)
+    return [
+        {
+            "attachment_id": a.attachment_id,
+            "filename": a.filename,
+            "file_size": a.file_size,
+            "mime_type": a.mime_type,
+            "uploaded_by": a.uploader.display_name if a.uploader else "",
+            "created_at": a.created_at,
+        }
+        for a in attachments
+    ]
+
+
+@router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.attachment_service import delete_attachment
+
+    success = delete_attachment(db, attachment_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return None
+
+
+@router.get("/attachments/{attachment_id}/download")
+def download_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.attachment_service import get_attachment
+
+    attachment = get_attachment(db, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return FileResponse(
+        attachment.file_path,
+        filename=attachment.filename,
+        media_type=attachment.mime_type,
+    )

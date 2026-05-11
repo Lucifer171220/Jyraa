@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app import crud, schemas
 from app.api.v1.dependencies import get_current_user
 from app.database import get_db
-from app.models import Board, BoardColumn, Issue, IssueStatus, User
+from app.models import Board, BoardColumn, Issue, IssueStatus, Sprint, User
 
 router = APIRouter(prefix="/boards", tags=["boards"])
 
@@ -157,3 +157,99 @@ def read_board_issues(board_id: int, db: Session = Depends(get_db), current_user
             }
         )
     return result
+
+
+def serialize_sprint(sprint: Sprint) -> dict:
+    total_capacity = sum(float(issue.original_estimate or 0) for issue in sprint.issues)
+    remaining_capacity = sum(float(issue.remaining_estimate or 0) for issue in sprint.issues)
+    return {
+        "sprint_id": sprint.sprint_id,
+        "board_id": sprint.board_id,
+        "name": sprint.name,
+        "goal": sprint.goal,
+        "start_date": sprint.start_date,
+        "end_date": sprint.end_date,
+        "sprint_status": sprint.sprint_status,
+        "is_completed": sprint.is_completed,
+        "issue_count": len(sprint.issues),
+        "planned_capacity_hours": total_capacity,
+        "remaining_capacity_hours": remaining_capacity,
+        "created_at": sprint.created_at,
+        "updated_at": sprint.updated_at,
+    }
+
+
+@router.get("/{board_id}/sprints", response_model=List[dict])
+def read_board_sprints(
+    board_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_board = crud.board.get(db, board_id)
+    if not db_board:
+        raise HTTPException(status_code=404, detail="Board not found")
+    sprints = db.query(Sprint).filter(Sprint.board_id == board_id).order_by(Sprint.start_date.desc()).all()
+    return [serialize_sprint(sprint) for sprint in sprints]
+
+
+@router.post("/{board_id}/sprints", response_model=dict, status_code=status.HTTP_201_CREATED)
+def create_sprint(
+    board_id: int,
+    sprint: schemas.SprintCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_board = crud.board.get(db, board_id)
+    if not db_board:
+        raise HTTPException(status_code=404, detail="Board not found")
+    db_sprint = Sprint(
+        board_id=board_id,
+        name=sprint.name,
+        goal=sprint.goal,
+        start_date=sprint.start_date,
+        end_date=sprint.end_date,
+        sprint_status="future",
+    )
+    db.add(db_sprint)
+    db.commit()
+    db.refresh(db_sprint)
+    return serialize_sprint(db_sprint)
+
+
+@router.post("/sprints/{sprint_id}/issues", response_model=dict)
+def add_issues_to_sprint(
+    sprint_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sprint = db.query(Sprint).filter(Sprint.sprint_id == sprint_id).first()
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    issue_ids = payload.get("issue_ids", [])
+    issues = db.query(Issue).filter(Issue.issue_id.in_(issue_ids)).all() if issue_ids else []
+    for issue in issues:
+        if issue not in sprint.issues:
+            sprint.issues.append(issue)
+    db.commit()
+    db.refresh(sprint)
+    return serialize_sprint(sprint)
+
+
+@router.get("/sprints/{sprint_id}/capacity", response_model=dict)
+def get_sprint_capacity(
+    sprint_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sprint = db.query(Sprint).filter(Sprint.sprint_id == sprint_id).first()
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    by_assignee = {}
+    for issue in sprint.issues:
+        assignee = issue.assignee.display_name if issue.assignee else "Unassigned"
+        by_assignee.setdefault(assignee, {"issue_count": 0, "planned_hours": 0.0, "remaining_hours": 0.0})
+        by_assignee[assignee]["issue_count"] += 1
+        by_assignee[assignee]["planned_hours"] += float(issue.original_estimate or 0)
+        by_assignee[assignee]["remaining_hours"] += float(issue.remaining_estimate or 0)
+    return {"sprint": serialize_sprint(sprint), "by_assignee": by_assignee}

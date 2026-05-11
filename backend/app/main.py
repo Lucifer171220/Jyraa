@@ -4,6 +4,7 @@ from app.config import settings
 from app.database import engine, Base, create_database_if_not_exists, seed_reference_data
 from app.api.v1 import api_router
 from app.auth import get_password_hash
+from app.middleware.rate_limit import RateLimitMiddleware
 
 app = FastAPI(
     title="ZYRAA API",
@@ -19,6 +20,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120, window_seconds=60)
 
 # Include API routes
 app.include_router(api_router)

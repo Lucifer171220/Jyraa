@@ -6,27 +6,37 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Database configuration
-SERVER = "localhost\\SQLEXPRESS02"
-DATABASE = "JiraDB"
-DRIVER = "ODBC+Driver+18+for+SQL+Server"
-TRUSTED_CONNECTION = "yes"
-TRUST_SERVER_CERT = "yes"
+# Database configuration. DATABASE_SERVER may be a full SQLAlchemy URL; if omitted
+# we keep the original trusted local SQL Server default for Windows development.
+SERVER = os.getenv("DATABASE_HOST", "localhost\\SQLEXPRESS02")
+DATABASE = os.getenv("DATABASE_NAME", "JiraDB")
+DRIVER = os.getenv("DATABASE_DRIVER", "ODBC+Driver+18+for+SQL+Server")
+TRUSTED_CONNECTION = os.getenv("DATABASE_TRUSTED_CONNECTION", "yes")
+TRUST_SERVER_CERT = os.getenv("DATABASE_TRUST_SERVER_CERT", "yes")
 
-DATABASE_URL = (
+DEFAULT_DATABASE_URL = (
     f"mssql+pyodbc://@{SERVER}/{DATABASE}"
     f"?driver={DRIVER}"
     f"&trusted_connection={TRUSTED_CONNECTION}"
     f"&TrustServerCertificate={TRUST_SERVER_CERT}"
 )
 
-# Master URL for admin operations (connects to master to create the database)
-MASTER_URL = (
-    f"mssql+pyodbc://@{SERVER}/master"
-    f"?driver={DRIVER}"
-    f"&trusted_connection={TRUSTED_CONNECTION}"
-    f"&TrustServerCertificate={TRUST_SERVER_CERT}"
-)
+DATABASE_URL = os.getenv("DATABASE_SERVER", DEFAULT_DATABASE_URL)
+
+
+def _master_url_from_database_url(database_url: str) -> str:
+    marker = f"/{DATABASE}"
+    if marker in database_url:
+        return database_url.replace(marker, "/master", 1)
+    return (
+        f"mssql+pyodbc://@{SERVER}/master"
+        f"?driver={DRIVER}"
+        f"&trusted_connection={TRUSTED_CONNECTION}"
+        f"&TrustServerCertificate={TRUST_SERVER_CERT}"
+    )
+
+
+MASTER_URL = _master_url_from_database_url(DATABASE_URL)
 
 
 def create_database_if_not_exists():
@@ -75,7 +85,7 @@ Base = declarative_base()
 
 def seed_reference_data():
     """Ensure core lookup tables contain the values the API expects."""
-    from app.models import IssuePriority, IssueStatus, IssueType, Resolution
+    from app.models import IssuePriority, IssueStatus, IssueType, Permission, Resolution
 
     reference_sets = (
         (
@@ -124,6 +134,22 @@ def seed_reference_data():
                 {"name": "Won't Do", "description": "Issue will not be worked on"},
                 {"name": "Duplicate", "description": "Issue is tracked elsewhere"},
                 {"name": "Cannot Reproduce", "description": "Problem could not be reproduced"},
+            ],
+        ),
+        (
+            Permission,
+            "permission_key",
+            [
+                {"permission_key": "project.admin", "description": "Manage project settings, roles, and integrations"},
+                {"permission_key": "project.read", "description": "View project work items and planning data"},
+                {"permission_key": "issue.create", "description": "Create issues in a project"},
+                {"permission_key": "issue.update", "description": "Update issues in a project"},
+                {"permission_key": "issue.delete", "description": "Delete issues in a project"},
+                {"permission_key": "sprint.manage", "description": "Create and update sprints"},
+                {"permission_key": "roadmap.manage", "description": "Create and update roadmaps"},
+                {"permission_key": "webhook.manage", "description": "Manage project webhooks"},
+                {"permission_key": "template.manage", "description": "Manage issue templates"},
+                {"permission_key": "dashboard.manage", "description": "Manage dashboards and gadgets"},
             ],
         ),
     )

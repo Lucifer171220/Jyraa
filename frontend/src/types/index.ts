@@ -102,6 +102,9 @@ export interface Sprint {
   is_completed: boolean;
   created_at: string;
   updated_at: string;
+  issue_count?: number;
+  planned_capacity_hours?: number;
+  remaining_capacity_hours?: number;
 }
 
 export interface Comment {
@@ -133,4 +136,101 @@ export interface Label {
   label_id: number;
   name: string;
   color_hex?: string;
+}
+
+export interface Attachment {
+  attachment_id: number;
+  filename: string;
+  file_size: number;
+  mime_type: string;
+  uploaded_by: string;
+  created_at: string;
+}
+
+export interface SavedFilter {
+  filter_id: number;
+  name: string;
+  jql_query: string;
+  is_favorite: boolean;
+  is_shared: boolean;
+}
+
+export interface Dashboard {
+  dashboard_id: number;
+  name: string;
+  description?: string;
+  is_shared: boolean;
+  gadgets?: DashboardGadget[];
+}
+
+export interface DashboardGadget {
+  gadget_id: number;
+  gadget_type: string;
+  title: string;
+  config?: string;
+  position_x: number;
+  position_y: number;
+  width: number;
+  height: number;
+}
+
+export interface Roadmap {
+  roadmap_id: number;
+  project_id: number;
+  project_key?: string;
+  name: string;
+  description?: string;
+  start_date?: string;
+  end_date?: string;
+  items?: RoadmapItem[];
+}
+
+export interface RoadmapItem {
+  item_id: number;
+  roadmap_id: number;
+  issue_id?: number;
+  issue_key?: string;
+  name: string;
+  description?: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+  color_hex?: string;
+  sort_order: number;
+}
+
+export interface ProjectRole {
+  role_id: number;
+  project_id: number;
+  user_id: number;
+  username: string;
+  display_name: string;
+  role_type: string;
+  permissions: string[];
+}
+
+export interface Permission {
+  permission_id: number;
+  permission_key: string;
+  description?: string;
+}
+
+export interface AuditEvent {
+  audit_id: number;
+  user_id?: number;
+  username?: string;
+  action_type: string;
+  entity_type: string;
+  entity_id?: number;
+  created_at: string;
+}
+
+export interface BackgroundTask {
+  task_id: number;
+  task_type: string;
+  status: string;
+  priority: number;
+  error_message?: string;
+  created_at: string;
+  completed_at?: string;
 }
