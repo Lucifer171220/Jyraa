@@ -1,0 +1,648 @@
+'use client';
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { ArrowLeftIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { Comment, Issue, User, Worklog } from '@/types';
+import { issueAPI, userAPI } from '@/lib/api';
+import { IssueComposerModal } from '@/components/IssueComposerModal';
+
+type IssueDetailPageProps = {
+  initialIssue: Issue;
+  onIssueUpdated?: (issue: Issue) => void | Promise<void>;
+};
+
+type DraftState = {
+  projectKey: string;
+  issueType: Issue['issue_type'];
+  status: Issue['status'];
+  priority: string;
+  summary: string;
+  description: string;
+  componentName: string;
+  versionName: string;
+  originalEstimate: string;
+  remainingEstimate: string;
+  dueDate: string;
+  labels: string;
+};
+
+const statuses = ['To Do', 'In Progress', 'In Review', 'Done', 'Cancelled'];
+const priorities = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];
+const issueTypes = ['Epic', 'Story', 'Task', 'Bug', 'Subtask'];
+
+const formatAssigneeLabel = (user: User) => `${user.display_name} (@${user.username})`;
+
+const buildDraft = (issue: Issue): DraftState => ({
+  projectKey: issue.project_key || '',
+  issueType: issue.issue_type,
+  status: issue.status,
+  priority: issue.priority || '',
+  summary: issue.summary,
+  description: issue.description || '',
+  componentName: issue.component_name || '',
+  versionName: issue.version_name || '',
+  originalEstimate: issue.original_estimate?.toString() || '',
+  remainingEstimate: issue.remaining_estimate?.toString() || '',
+  dueDate: issue.due_date ? issue.due_date.slice(0, 10) : '',
+  labels: (issue.label_names || []).join(', '),
+});
+
+const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : 'None');
+const formatDateTime = (value?: string | null) => (value ? new Date(value).toLocaleString() : 'None');
+
+const buildUpdatePayload = (draft: DraftState) => ({
+  project_key: draft.projectKey.trim(),
+  issue_type: draft.issueType,
+  summary: draft.summary,
+  description: draft.description,
+  priority: draft.priority || null,
+  status: draft.status,
+  component_name: draft.componentName.trim() || null,
+  version_name: draft.versionName.trim() || null,
+  original_estimate: draft.originalEstimate ? Number(draft.originalEstimate) : undefined,
+  remaining_estimate: draft.remainingEstimate ? Number(draft.remainingEstimate) : undefined,
+  due_date: draft.dueDate || null,
+  label_names: draft.labels.split(',').map((label) => label.trim()).filter(Boolean),
+});
+
+export function IssueDetailPage({ initialIssue, onIssueUpdated }: IssueDetailPageProps) {
+  const router = useRouter();
+  const [issue, setIssue] = useState(initialIssue);
+  const [draft, setDraft] = useState<DraftState>(() => buildDraft(initialIssue));
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [worklogs, setWorklogs] = useState<Worklog[]>([]);
+  const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'worklogs'>('details');
+  const [assigneeQuery, setAssigneeQuery] = useState(initialIssue.assignee_username || '');
+  const [selectedAssignee, setSelectedAssignee] = useState<User | null>(null);
+  const [assigneeResults, setAssigneeResults] = useState<User[]>([]);
+  const [isSearchingAssignees, setIsSearchingAssignees] = useState(false);
+  const [epicQuery, setEpicQuery] = useState(initialIssue.epic_issue_key ? `${initialIssue.epic_issue_key} - ${initialIssue.epic_issue_summary || ''}`.trim() : '');
+  const [selectedEpicKey, setSelectedEpicKey] = useState<string | null>(initialIssue.epic_issue_key || null);
+  const [epicResults, setEpicResults] = useState<Issue[]>([]);
+  const [isSearchingEpics, setIsSearchingEpics] = useState(false);
+  const [comment, setComment] = useState('');
+  const [timeSpent, setTimeSpent] = useState('');
+  const [worklogComment, setWorklogComment] = useState('');
+  const [startedAt, setStartedAt] = useState(new Date().toISOString().slice(0, 16));
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const lastSavedPayloadRef = useRef(JSON.stringify(buildUpdatePayload(buildDraft(initialIssue))));
+  const syncingRef = useRef(false);
+
+  useEffect(() => {
+    setIssue(initialIssue);
+    setDraft(buildDraft(initialIssue));
+    setAssigneeQuery(initialIssue.assignee_username || '');
+    setSelectedAssignee(null);
+    setEpicQuery(initialIssue.epic_issue_key ? `${initialIssue.epic_issue_key} - ${initialIssue.epic_issue_summary || ''}`.trim() : '');
+    setSelectedEpicKey(initialIssue.epic_issue_key || null);
+    lastSavedPayloadRef.current = JSON.stringify(buildUpdatePayload(buildDraft(initialIssue)));
+  }, [initialIssue]);
+
+  useEffect(() => {
+    void fetchComments();
+    void fetchWorklogs();
+  }, [issue.issue_id]);
+
+  useEffect(() => {
+    const search = assigneeQuery.trim();
+    if (search.length < 2) {
+      setAssigneeResults([]);
+      setIsSearchingAssignees(false);
+      return;
+    }
+    if (selectedAssignee && search === formatAssigneeLabel(selectedAssignee)) {
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setIsSearchingAssignees(true);
+      try {
+        const response = await userAPI.search({ q: search, limit: 8 });
+        setAssigneeResults(response.data as User[]);
+      } catch (searchError) {
+        console.error('Failed to search assignees:', searchError);
+        setAssigneeResults([]);
+      } finally {
+        setIsSearchingAssignees(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [assigneeQuery, selectedAssignee]);
+
+  useEffect(() => {
+    const search = epicQuery.trim();
+    if (issue.issue_type === 'Epic' || !issue.project_key || search.length < 2) {
+      setEpicResults([]);
+      setIsSearchingEpics(false);
+      return;
+    }
+    if (selectedEpicKey && search.startsWith(selectedEpicKey)) {
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setIsSearchingEpics(true);
+      try {
+        const response = await issueAPI.getAll({
+          project_key: issue.project_key,
+          issue_type_name: 'Epic',
+          search,
+          limit: 8,
+        });
+        setEpicResults((response.data as Issue[]).filter((candidate) => candidate.issue_id !== issue.issue_id));
+      } catch (searchError) {
+        console.error('Failed to search epics:', searchError);
+        setEpicResults([]);
+      } finally {
+        setIsSearchingEpics(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [epicQuery, issue.issue_id, issue.issue_type, issue.project_key, selectedEpicKey]);
+
+  useEffect(() => {
+    if (syncingRef.current) return;
+    const payload = buildUpdatePayload(draft);
+    const serializedPayload = JSON.stringify(payload);
+
+    if (serializedPayload === lastSavedPayloadRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setSaveState('saving');
+      setError('');
+      syncingRef.current = true;
+      try {
+        const response = await issueAPI.update(issue.issue_id, payload);
+        const updatedIssue = response.data as Issue;
+        setIssue(updatedIssue);
+        setDraft(buildDraft(updatedIssue));
+        setAssigneeQuery(updatedIssue.assignee_username || '');
+        setEpicQuery(updatedIssue.epic_issue_key ? `${updatedIssue.epic_issue_key} - ${updatedIssue.epic_issue_summary || ''}`.trim() : '');
+        setSelectedEpicKey(updatedIssue.epic_issue_key || null);
+        lastSavedPayloadRef.current = JSON.stringify(buildUpdatePayload(buildDraft(updatedIssue)));
+        setSaveState('saved');
+        await onIssueUpdated?.(updatedIssue);
+      } catch (updateError: any) {
+        console.error('Failed to update issue:', updateError);
+        setSaveState('error');
+        setError(updateError?.response?.data?.detail || 'Failed to update issue');
+      } finally {
+        syncingRef.current = false;
+      }
+    }, 650);
+
+    return () => window.clearTimeout(timer);
+  }, [draft, issue.issue_id, onIssueUpdated]);
+
+  const fetchComments = async () => {
+    try {
+      const res = await issueAPI.getComments(issue.issue_id);
+      setComments(res.data);
+    } catch (fetchError) {
+      console.error('Failed to fetch comments:', fetchError);
+    }
+  };
+
+  const fetchWorklogs = async () => {
+    try {
+      const res = await issueAPI.getWorklogs(issue.issue_id);
+      setWorklogs(res.data);
+    } catch (fetchError) {
+      console.error('Failed to fetch worklogs:', fetchError);
+    }
+  };
+
+  const saveAssignee = async (username: string | null) => {
+    setSaveState('saving');
+    setError('');
+    try {
+      const response = await issueAPI.update(issue.issue_id, { assignee_username: username });
+      const updatedIssue = response.data as Issue;
+      setIssue(updatedIssue);
+      setDraft(buildDraft(updatedIssue));
+      setAssigneeQuery(updatedIssue.assignee_username || '');
+      setSelectedAssignee(null);
+      lastSavedPayloadRef.current = JSON.stringify(buildUpdatePayload(buildDraft(updatedIssue)));
+      setSaveState('saved');
+      await onIssueUpdated?.(updatedIssue);
+    } catch (updateError: any) {
+      console.error('Failed to update assignee:', updateError);
+      setSaveState('error');
+      setError(updateError?.response?.data?.detail || 'Failed to update assignee');
+    }
+  };
+
+  const saveEpic = async (epicIssueKey: string | null, displayValue: string) => {
+    setSaveState('saving');
+    setError('');
+    try {
+      const response = await issueAPI.updateEpic(issue.issue_id, epicIssueKey);
+      const updatedIssue = response.data as Issue;
+      setIssue(updatedIssue);
+      setDraft(buildDraft(updatedIssue));
+      setEpicQuery(displayValue);
+      setSelectedEpicKey(epicIssueKey);
+      setEpicResults([]);
+      lastSavedPayloadRef.current = JSON.stringify(buildUpdatePayload(buildDraft(updatedIssue)));
+      setSaveState('saved');
+      await onIssueUpdated?.(updatedIssue);
+    } catch (updateError: any) {
+      console.error('Failed to update epic:', updateError);
+      setSaveState('error');
+      setError(updateError?.response?.data?.detail || 'Failed to update epic');
+    }
+  };
+
+  const handleSelectAssignee = async (user: User) => {
+    setSelectedAssignee(user);
+    setAssigneeQuery(formatAssigneeLabel(user));
+    setAssigneeResults([]);
+    await saveAssignee(user.username);
+  };
+
+  const handleClearAssignee = async () => {
+    setAssigneeQuery('');
+    setSelectedAssignee(null);
+    setAssigneeResults([]);
+    await saveAssignee(null);
+  };
+
+  const handleSelectEpic = async (epic: Issue) => {
+    const displayValue = `${epic.issue_key} - ${epic.summary}`;
+    setEpicQuery(displayValue);
+    await saveEpic(epic.issue_key, displayValue);
+  };
+
+  const handleClearEpic = async () => {
+    setEpicQuery('');
+    setSelectedEpicKey(null);
+    setEpicResults([]);
+    await saveEpic(null, '');
+  };
+
+  const handleAddComment = async () => {
+    if (!comment.trim()) return;
+    setIsSubmitting(true);
+    try {
+      await issueAPI.addComment(issue.issue_id, comment);
+      setComment('');
+      await fetchComments();
+      setActiveTab('comments');
+    } catch (commentError) {
+      console.error('Failed to add comment:', commentError);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddWorklog = async () => {
+    if (!timeSpent || Number(timeSpent) <= 0) return;
+    setIsSubmitting(true);
+    try {
+      await issueAPI.addWorklog(issue.issue_id, {
+        time_spent: Number(timeSpent),
+        comment: worklogComment || undefined,
+        started_at: new Date(startedAt).toISOString(),
+      });
+      setTimeSpent('');
+      setWorklogComment('');
+      setStartedAt(new Date().toISOString().slice(0, 16));
+      await fetchWorklogs();
+      const refreshed = await issueAPI.getById(issue.issue_id);
+      const updatedIssue = refreshed.data as Issue;
+      setIssue(updatedIssue);
+      setDraft(buildDraft(updatedIssue));
+      lastSavedPayloadRef.current = JSON.stringify(buildUpdatePayload(buildDraft(updatedIssue)));
+      await onIssueUpdated?.(updatedIssue);
+      setActiveTab('worklogs');
+    } catch (worklogError) {
+      console.error('Failed to add worklog:', worklogError);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const saveIndicator = useMemo(() => {
+    if (saveState === 'saving') return 'Saving changes...';
+    if (saveState === 'saved') return 'All changes saved';
+    if (saveState === 'error') return 'Save failed';
+    return 'Editing live';
+  }, [saveState]);
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-[0_22px_55px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <button
+              onClick={() => router.back()}
+              className="inline-flex items-center text-sm font-medium text-slate-500 transition hover:text-slate-700"
+            >
+              <ArrowLeftIcon className="mr-1 h-4 w-4" />
+              Back
+            </button>
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+              {issue.project_id ? (
+                <Link href={`/projects/${issue.project_id}`} className="font-semibold text-sky-700 hover:text-sky-800">
+                  {issue.project_key}
+                </Link>
+              ) : (
+                <span className="font-semibold text-sky-700">{issue.project_key}</span>
+              )}
+              <span className="text-slate-400">/</span>
+              <span className="font-semibold text-slate-700">{issue.issue_key}</span>
+            </div>
+            <input
+              value={draft.summary}
+              onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+              className="mt-4 w-full max-w-4xl rounded-2xl border border-transparent bg-transparent px-0 py-1 text-3xl font-semibold text-slate-950 outline-none transition focus:border-slate-200 focus:bg-white focus:px-4"
+            />
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
+                {issue.issue_key}
+              </span>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${issue.issue_type === 'Epic' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                {issue.issue_type}
+              </span>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${saveState === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-sky-100 text-sky-700'}`}>
+                {saveIndicator}
+              </span>
+            </div>
+          </div>
+
+          {issue.issue_type === 'Epic' ? (
+            <button
+              onClick={() => setIsComposerOpen(true)}
+              className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              <PlusIcon className="mr-2 h-5 w-5" />
+              Add story
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_320px]">
+        <div className="space-y-6">
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-950">Details</h3>
+            </div>
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Project</label>
+                <input value={draft.projectKey} onChange={(event) => setDraft((current) => ({ ...current, projectKey: event.target.value.toUpperCase() }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Issue type</label>
+                <select value={draft.issueType} onChange={(event) => setDraft((current) => ({ ...current, issueType: event.target.value as Issue['issue_type'] }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400">
+                  {issueTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Status</label>
+                <select value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as Issue['status'] }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400">
+                  {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Priority</label>
+                <select value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400">
+                  <option value="">None</option>
+                  {priorities.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Component</label>
+                <input value={draft.componentName} onChange={(event) => setDraft((current) => ({ ...current, componentName: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Fix version</label>
+                <input value={draft.versionName} onChange={(event) => setDraft((current) => ({ ...current, versionName: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Original estimate (hours)</label>
+                <input type="number" min="0" step="0.5" value={draft.originalEstimate} onChange={(event) => setDraft((current) => ({ ...current, originalEstimate: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Remaining estimate (hours)</label>
+                <input type="number" min="0" step="0.5" value={draft.remainingEstimate} onChange={(event) => setDraft((current) => ({ ...current, remainingEstimate: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Due date</label>
+                <input type="date" value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Resolution</label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{issue.resolution || 'Unresolved'}</div>
+              </div>
+              <div className="md:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-600">Labels</label>
+                <input value={draft.labels} onChange={(event) => setDraft((current) => ({ ...current, labels: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" placeholder="frontend, api, urgent" />
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-lg font-semibold text-slate-950">Description</h3>
+            </div>
+            <div className="p-5">
+              <textarea
+                value={draft.description}
+                onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+                rows={10}
+                className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400"
+                placeholder="Add the problem statement, scope, expected behavior, and any acceptance notes."
+              />
+            </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'details' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('details')}>Activity overview</button>
+                <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'comments' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('comments')}>Comments ({comments.length})</button>
+                <button className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${activeTab === 'worklogs' ? 'border-jira-blue text-jira-blue' : 'border-transparent text-slate-500 hover:text-slate-700'}`} onClick={() => setActiveTab('worklogs')}>Work log ({worklogs.length})</button>
+              </div>
+            </div>
+            <div className="p-5">
+              {activeTab === 'details' ? (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4"><p className="text-sm text-slate-500">Reporter</p><p className="mt-2 text-sm font-semibold text-slate-900">{issue.reporter_display_name}</p><p className="mt-1 text-xs text-slate-500">@{issue.reporter_username}</p></div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4"><p className="text-sm text-slate-500">Created</p><p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(issue.created_at)}</p></div>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4"><p className="text-sm text-slate-500">Updated</p><p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(issue.updated_at)}</p></div>
+                </div>
+              ) : null}
+
+              {activeTab === 'comments' ? (
+                <div className="space-y-5">
+                  {comments.map((item) => (
+                    <div key={item.comment_id} className="rounded-2xl border border-slate-200 px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-900">{item.display_name}</p>
+                        <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{item.body}</p>
+                    </div>
+                  ))}
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400" placeholder="Add a comment..." />
+                    <div className="mt-3 flex justify-end">
+                      <button onClick={handleAddComment} disabled={isSubmitting || !comment.trim()} className="inline-flex items-center rounded-xl bg-jira-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">
+                        <PlusIcon className="mr-2 h-4 w-4" />
+                        Add comment
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {activeTab === 'worklogs' ? (
+                <div className="space-y-5">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="grid gap-3 md:grid-cols-[140px_1fr]">
+                      <input type="number" min="0" step="0.5" value={timeSpent} onChange={(event) => setTimeSpent(event.target.value)} placeholder="Hours" className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-sky-400" />
+                      <input type="datetime-local" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-sky-400" />
+                    </div>
+                    <textarea value={worklogComment} onChange={(event) => setWorklogComment(event.target.value)} rows={3} placeholder="What did you work on?" className="mt-3 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400" />
+                    <div className="mt-3 flex justify-end">
+                      <button onClick={handleAddWorklog} disabled={isSubmitting || !timeSpent} className="rounded-xl bg-jira-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">Add work log</button>
+                    </div>
+                  </div>
+                  {worklogs.map((entry) => (
+                    <div key={entry.worklog_id} className="rounded-2xl border border-slate-200 px-4 py-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{entry.display_name || entry.username || 'Team member'}</p>
+                          <p className="mt-1 text-xs text-slate-500">{formatDateTime(entry.started_at)}</p>
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">{entry.time_spent}h</span>
+                      </div>
+                      {entry.comment ? <p className="mt-3 text-sm leading-7 text-slate-700">{entry.comment}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-5">
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4"><h3 className="text-lg font-semibold text-slate-950">People</h3></div>
+            <div className="space-y-4 p-5">
+              <div>
+                <p className="text-sm font-medium text-slate-500">Assignee</p>
+                <div className="relative mt-2">
+                  <input value={assigneeQuery} onChange={(event) => setAssigneeQuery(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" placeholder="Search by name, username, or email" />
+                  {assigneeResults.length > 0 ? (
+                    <div className="absolute z-10 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                      {assigneeResults.map((user) => (
+                        <button key={user.user_id} type="button" onClick={() => void handleSelectAssignee(user)} className="block w-full border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 last:border-b-0">
+                          <p className="text-sm font-semibold text-slate-900">{user.display_name}</p>
+                          <p className="text-xs text-slate-500">@{user.username} - {user.email}</p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  {isSearchingAssignees ? <p className="text-xs text-slate-500">Searching team members...</p> : null}
+                  {(issue.assignee_name || issue.assignee_username) ? (
+                    <button type="button" onClick={() => void handleClearAssignee()} className="text-xs font-medium text-rose-600 hover:text-rose-700">
+                      Clear assignee
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Reporter</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">{issue.reporter_display_name}</p>
+                <p className="text-xs text-slate-500">@{issue.reporter_username}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4"><h3 className="text-lg font-semibold text-slate-950">Epic Link</h3></div>
+            <div className="space-y-3 p-5">
+              {issue.issue_type === 'Epic' ? (
+                <p className="text-sm text-slate-600">This issue is an epic.</p>
+              ) : (
+                <>
+                  <div className="relative">
+                    <input value={epicQuery} onChange={(event) => setEpicQuery(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-400" placeholder="Search epics by key or summary" />
+                    {epicResults.length > 0 ? (
+                      <div className="absolute z-10 mt-2 max-h-52 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                        {epicResults.map((epic) => (
+                          <button key={epic.issue_id} type="button" onClick={() => void handleSelectEpic(epic)} className="block w-full border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 last:border-b-0">
+                            <p className="text-sm font-semibold text-slate-900">{epic.issue_key}</p>
+                            <p className="text-xs text-slate-500">{epic.summary}</p>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {selectedEpicKey ? (
+                      <button type="button" onClick={() => void handleClearEpic()} className="text-xs font-medium text-rose-600 hover:text-rose-700">
+                        Remove epic link
+                      </button>
+                    ) : null}
+                    {isSearchingEpics ? <p className="text-xs text-slate-500">Searching epics...</p> : null}
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4"><h3 className="text-lg font-semibold text-slate-950">Dates</h3></div>
+            <div className="space-y-4 p-5">
+              <div><p className="text-sm font-medium text-slate-500">Created</p><p className="mt-1 text-sm text-slate-900">{formatDateTime(issue.created_at)}</p></div>
+              <div><p className="text-sm font-medium text-slate-500">Updated</p><p className="mt-1 text-sm text-slate-900">{formatDateTime(issue.updated_at)}</p></div>
+              <div><p className="text-sm font-medium text-slate-500">Due date</p><p className="mt-1 text-sm text-slate-900">{formatDate(issue.due_date)}</p></div>
+            </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-5 py-4"><h3 className="text-lg font-semibold text-slate-950">Time Tracking</h3></div>
+            <div className="space-y-4 p-5">
+              <div className="flex items-center justify-between text-sm"><span className="text-slate-500">Estimated</span><span className="font-semibold text-slate-900">{issue.original_estimate ?? 'None'}{issue.original_estimate !== undefined && issue.original_estimate !== null ? 'h' : ''}</span></div>
+              <div className="flex items-center justify-between text-sm"><span className="text-slate-500">Remaining</span><span className="font-semibold text-slate-900">{issue.remaining_estimate ?? 'None'}{issue.remaining_estimate !== undefined && issue.remaining_estimate !== null ? 'h' : ''}</span></div>
+              <div className="flex items-center justify-between text-sm"><span className="text-slate-500">Logged</span><span className="font-semibold text-slate-900">{issue.time_spent}h</span></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      {isComposerOpen ? (
+        <IssueComposerModal
+          projectKey={issue.project_key || ''}
+          defaultIssueType="Story"
+          parentEpic={{ issue_key: issue.issue_key, summary: issue.summary }}
+          onClose={() => setIsComposerOpen(false)}
+          onCreated={() => {
+            setIsComposerOpen(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
