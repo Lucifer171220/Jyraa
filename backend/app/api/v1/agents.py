@@ -1,6 +1,11 @@
+import asyncio
+import json
+import time
 from datetime import datetime
+from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -44,6 +49,56 @@ class RepositoryReviewRequest(BaseModel):
     max_files: int = Field(default=120, ge=10, le=300)
 
 
+def _stream_line(event_type: str, **payload: Any) -> str:
+    return json.dumps({"type": event_type, **payload}, default=str) + "\n"
+
+
+async def _stream_operation(
+    label: str,
+    operation: Callable[[], Awaitable[dict[str, Any]]],
+    *,
+    progress_messages: list[str],
+) -> StreamingResponse:
+    async def events():
+        started = time.monotonic()
+        yield _stream_line("status", message=f"{label} started", elapsed_seconds=0)
+        task = asyncio.create_task(operation())
+        message_index = 0
+
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=2)
+            if task in done:
+                break
+            elapsed = round(time.monotonic() - started, 1)
+            message = progress_messages[min(message_index, len(progress_messages) - 1)]
+            message_index += 1
+            yield _stream_line("status", message=message, elapsed_seconds=elapsed)
+
+        try:
+            result = await task
+        except Exception as exc:
+            yield _stream_line(
+                "error",
+                message=f"{label} failed",
+                detail=str(exc),
+                elapsed_seconds=round(time.monotonic() - started, 1),
+            )
+            return
+
+        yield _stream_line(
+            "result",
+            message=f"{label} completed",
+            data=result,
+            elapsed_seconds=round(time.monotonic() - started, 1),
+        )
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/status")
 def agent_status(current_user: User = Depends(get_current_user)) -> dict:
     model = choose_best_model()
@@ -75,6 +130,30 @@ async def run_automation(
     )
 
 
+@router.post("/automation/run/stream")
+async def run_automation_stream(
+    payload: RunAutomationAgentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await _stream_operation(
+        "Automation workflow",
+        lambda: run_agentic_workflow(
+            db,
+            current_user,
+            issue_id=payload.issue_id,
+            board_id=payload.board_id,
+            intent=payload.intent,
+        ),
+        progress_messages=[
+            "Inspecting sprint, issue, and PR context",
+            "Running deterministic agents",
+            "Generating executive summary",
+            "Preparing structured workflow output",
+        ],
+    )
+
+
 @router.post("/workflow/ask")
 async def ask_agent(
     payload: AskAgentRequest,
@@ -84,6 +163,24 @@ async def ask_agent(
     return await run_conversational_agent(db, current_user, payload.message)
 
 
+@router.post("/workflow/ask/stream")
+async def ask_agent_stream(
+    payload: AskAgentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await _stream_operation(
+        "Agent answer",
+        lambda: run_conversational_agent(db, current_user, payload.message),
+        progress_messages=[
+            "Routing your question to the right agent",
+            "Reading current project data",
+            "Synthesizing the answer",
+            "Formatting the response",
+        ],
+    )
+
+
 @router.post("/prompt/execute")
 async def execute_prompt(
     payload: PromptAutomationRequest,
@@ -91,6 +188,24 @@ async def execute_prompt(
     current_user: User = Depends(get_current_user),
 ):
     return await run_prompt_automation(db, current_user, payload.prompt)
+
+
+@router.post("/prompt/execute/stream")
+async def execute_prompt_stream(
+    payload: PromptAutomationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await _stream_operation(
+        "Prompt automation",
+        lambda: run_prompt_automation(db, current_user, payload.prompt),
+        progress_messages=[
+            "Planning the requested workflow",
+            "Creating or resolving project structure",
+            "Creating issues and links",
+            "Assigning owners and preparing notifications",
+        ],
+    )
 
 
 @router.post("/repository/review")
@@ -106,6 +221,39 @@ async def review_repository(
     )
     result["requested_by"] = current_user.username
     return result
+
+
+@router.post("/repository/review/stream")
+async def review_repository_stream(
+    payload: RepositoryReviewRequest,
+    current_user: User = Depends(get_current_user),
+):
+    async def run_review() -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            lambda: asyncio.run(
+                review_repository_from_github(
+                    payload.repository_url,
+                    branch=payload.branch,
+                    github_token=payload.github_token,
+                    max_files=payload.max_files,
+                )
+            )
+        )
+        result["requested_by"] = current_user.username
+        return result
+
+    return await _stream_operation(
+        "Repository review",
+        run_review,
+        progress_messages=[
+            "Fetching repository metadata and file tree",
+            "Downloading prioritized source files",
+            "Running strict SAST and project-structure checks",
+            "Checking dependency manifests against OSV",
+            "Generating the security summary",
+            "Assembling the final report",
+        ],
+    )
 
 
 @router.post("/actions/{action_id}/approve")

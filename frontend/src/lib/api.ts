@@ -9,6 +9,63 @@ const api = axios.create({
   },
 });
 
+export type AgentStreamEvent = {
+  type: 'status' | 'result' | 'error';
+  message?: string;
+  detail?: string;
+  elapsed_seconds?: number;
+  data?: any;
+};
+
+async function postStream(
+  path: string,
+  data: unknown,
+  onEvent: (event: AgentStreamEvent) => void
+) {
+  const token = localStorage.getItem('access_token');
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (response.status === 401) {
+    localStorage.removeItem('access_token');
+    window.location.href = '/login';
+    throw new Error('Authentication expired');
+  }
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Streaming request failed with status ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      onEvent(JSON.parse(line) as AgentStreamEvent);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    onEvent(JSON.parse(buffer) as AgentStreamEvent);
+  }
+}
+
 // Add token interceptor
 api.interceptors.request.use(
   (config) => {
@@ -165,10 +222,20 @@ export const agentAPI = {
   getStatus: () => api.get('/agents/status'),
   runAutomation: (data: { intent?: string; issue_id?: number; board_id?: number }) =>
     api.post('/agents/automation/run', data),
+  runAutomationStream: (data: { intent?: string; issue_id?: number; board_id?: number }, onEvent: (event: AgentStreamEvent) => void) =>
+    postStream('/agents/automation/run/stream', data, onEvent),
   ask: (message: string) => api.post('/agents/workflow/ask', { message }),
+  askStream: (message: string, onEvent: (event: AgentStreamEvent) => void) =>
+    postStream('/agents/workflow/ask/stream', { message }, onEvent),
   executePrompt: (prompt: string) => api.post('/agents/prompt/execute', { prompt }),
+  executePromptStream: (prompt: string, onEvent: (event: AgentStreamEvent) => void) =>
+    postStream('/agents/prompt/execute/stream', { prompt }, onEvent),
   reviewRepository: (data: { repository_url: string; branch?: string; github_token?: string; max_files?: number }) =>
     api.post('/agents/repository/review', data),
+  reviewRepositoryStream: (
+    data: { repository_url: string; branch?: string; github_token?: string; max_files?: number },
+    onEvent: (event: AgentStreamEvent) => void
+  ) => postStream('/agents/repository/review/stream', data, onEvent),
   approveAction: (actionId: number) => api.post(`/agents/actions/${actionId}/approve`),
   rejectAction: (actionId: number) => api.post(`/agents/actions/${actionId}/reject`),
 };

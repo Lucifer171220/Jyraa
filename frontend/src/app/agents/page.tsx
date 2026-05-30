@@ -9,7 +9,7 @@ import {
   SparklesIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
-import { agentAPI } from '@/lib/api';
+import { agentAPI, type AgentStreamEvent } from '@/lib/api';
 
 type AgentStatus = {
   nim_available: boolean;
@@ -123,6 +123,7 @@ export default function AgentsPage() {
   const [repositoryToken, setRepositoryToken] = useState('');
   const [maxFiles, setMaxFiles] = useState('120');
   const [result, setResult] = useState<any>(null);
+  const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -136,9 +137,10 @@ export default function AgentsPage() {
 
   async function runAutomation() {
     setLoading(true);
+    setResult(null);
+    setStreamEvents([]);
     try {
-      const response = await agentAPI.runAutomation({ intent: 'full_scan' });
-      setResult(response.data);
+      await agentAPI.runAutomationStream({ intent: 'full_scan' }, handleStreamEvent);
     } finally {
       setLoading(false);
     }
@@ -146,9 +148,10 @@ export default function AgentsPage() {
 
   async function askAgent() {
     setLoading(true);
+    setResult(null);
+    setStreamEvents([]);
     try {
-      const response = await agentAPI.ask(question);
-      setResult(response.data);
+      await agentAPI.askStream(question, handleStreamEvent);
     } finally {
       setLoading(false);
     }
@@ -156,9 +159,10 @@ export default function AgentsPage() {
 
   async function executePrompt() {
     setLoading(true);
+    setResult(null);
+    setStreamEvents([]);
     try {
-      const response = await agentAPI.executePrompt(prompt);
-      setResult(response.data);
+      await agentAPI.executePromptStream(prompt, handleStreamEvent);
       await loadStatus();
     } finally {
       setLoading(false);
@@ -167,16 +171,24 @@ export default function AgentsPage() {
 
   async function reviewRepository() {
     setLoading(true);
+    setResult(null);
+    setStreamEvents([]);
     try {
-      const response = await agentAPI.reviewRepository({
+      await agentAPI.reviewRepositoryStream({
         repository_url: repositoryUrl,
         branch: repositoryBranch.trim() || undefined,
         github_token: repositoryToken.trim() || undefined,
         max_files: maxFiles ? Number(maxFiles) : undefined,
-      });
-      setResult(response.data);
+      }, handleStreamEvent);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleStreamEvent(event: AgentStreamEvent) {
+    setStreamEvents((current) => [...current, event]);
+    if (event.type === 'result') {
+      setResult(event.data);
     }
   }
 
@@ -220,7 +232,10 @@ export default function AgentsPage() {
             Run full automation
           </button>
           <button
-            onClick={() => setResult(null)}
+            onClick={() => {
+              setResult(null);
+              setStreamEvents([]);
+            }}
             className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
             <XMarkIcon className="h-4 w-4" />
@@ -317,8 +332,53 @@ export default function AgentsPage() {
         </div>
       </section>
 
+      {(loading || streamEvents.length > 0) && <StreamProgress events={streamEvents} loading={loading} />}
       {result && <ResultRenderer result={result} />}
     </div>
+  );
+}
+
+function StreamProgress({ events, loading }: { events: AgentStreamEvent[]; loading: boolean }) {
+  const latest = [...events].reverse().find((event) => event.type === 'status' || event.type === 'error' || event.type === 'result');
+  const statusEvents = events.filter((event) => event.type === 'status');
+  const error = events.find((event) => event.type === 'error');
+
+  return (
+    <section className="rounded-[2rem] border border-slate-200 bg-white/90 p-5 shadow-[0_22px_55px_rgba(15,23,42,0.08)] backdrop-blur">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">
+            {error ? 'Stream error' : loading ? 'Streaming response' : 'Stream complete'}
+          </p>
+          <h3 className="mt-2 text-lg font-semibold text-slate-950">
+            {latest?.message || 'Opening response stream...'}
+          </h3>
+          {latest?.elapsed_seconds !== undefined ? (
+            <p className="mt-1 text-sm text-slate-500">{latest.elapsed_seconds}s elapsed</p>
+          ) : null}
+        </div>
+        {loading ? (
+          <div className="h-3 w-3 shrink-0 animate-pulse rounded-full bg-sky-500 shadow-[0_0_0_8px_rgba(14,165,233,0.12)]" />
+        ) : (
+          <div className={cx('h-3 w-3 shrink-0 rounded-full', error ? 'bg-red-500' : 'bg-emerald-500')} />
+        )}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {statusEvents.slice(-6).map((event, index) => (
+          <div key={`${event.message}-${event.elapsed_seconds}-${index}`} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />
+            <span className="min-w-0 flex-1">{event.message}</span>
+            {event.elapsed_seconds !== undefined ? <span className="text-xs font-medium text-slate-500">{event.elapsed_seconds}s</span> : null}
+          </div>
+        ))}
+        {error ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error.detail || error.message || 'The streamed request failed.'}
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
