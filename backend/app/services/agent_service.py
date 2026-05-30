@@ -27,9 +27,9 @@ from app.models import (
     UserSkill,
 )
 from app.services.email_service import email_is_configured, send_issue_assignment_email
-from app.services.langchain_service import build_automation_plan, langchain_available
+from app.services.langchain_service import build_automation_plan_with_nim
 from app.services.code_analyzer import analyze_code_from_github, create_bugs_from_findings
-from app.services.ollama_service import choose_best_model, generate_response
+from app.services.nim_service import choose_best_model, generate_response
 from app.services.sprint_service import activate_current_sprint, close_completed_sprint, create_sprint_for_board
 
 MAX_ISSUES_PER_USER = 3
@@ -282,7 +282,7 @@ def sprint_agent(state: AgentState) -> AgentState:
 async def executive_agent(state: AgentState) -> AgentState:
     output = state.get("output", {})
     fallback = {
-        "summary": "Deterministic automation completed. Ollama was not available for narrative synthesis.",
+        "summary": "Deterministic automation completed. NIM was not available for narrative synthesis.",
         "recommended_actions": [],
         "source_model": None,
     }
@@ -730,7 +730,7 @@ def _link_issue_chain(db: Session, issues: list[Issue]) -> None:
 
 
 async def run_prompt_automation(db: Session, user: User, prompt: str) -> dict[str, Any]:
-    plan = build_automation_plan(prompt)
+    plan = await build_automation_plan_with_nim(prompt)
     project = _create_project_from_plan(db, user, plan.get("project", {}))
     board = _create_board_from_plan(db, project, plan.get("board", {}))
     created_issues = _create_issues_from_plan(db, user, project, plan)
@@ -743,7 +743,7 @@ async def run_prompt_automation(db: Session, user: User, prompt: str) -> dict[st
     primary_assignment = assignments[0] if assignments else {"assigned": False}
 
     return {
-        "mode": "langchain" if langchain_available() and choose_best_model() else "fallback",
+        "mode": "nim-assisted" if choose_best_model() else "fallback",
         "workflow_engine": "langgraph" if langgraph_available() else "internal-state-graph",
         "email_configured": email_is_configured(),
         "plan": plan,

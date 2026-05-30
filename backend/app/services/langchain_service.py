@@ -2,29 +2,24 @@ import json
 import re
 from typing import Any
 
-from app.services.ollama_service import choose_best_model
-
-try:
-    from langchain_ollama import ChatOllama
-except ImportError:  # pragma: no cover - optional dependency
-    ChatOllama = None
+from app.services.nim_service import choose_best_model, generate_response, langchain_nvidia_available
 
 
 def langchain_available() -> bool:
-    return ChatOllama is not None
+    return langchain_nvidia_available() and choose_best_model() is not None
 
 
 def build_automation_plan(prompt: str) -> dict[str, Any]:
-    if langchain_available() and choose_best_model():
-        plan = _build_plan_with_langchain(prompt)
-        if plan:
-            return plan
     return _fallback_plan(prompt)
 
 
-def _build_plan_with_langchain(prompt: str) -> dict[str, Any] | None:
+async def build_automation_plan_with_nim(prompt: str) -> dict[str, Any]:
+    plan = await _build_plan_with_nim(prompt)
+    return plan or _fallback_plan(prompt)
+
+
+async def _build_plan_with_nim(prompt: str) -> dict[str, Any] | None:
     try:
-        llm = ChatOllama(model=choose_best_model(), temperature=0)
         structured_prompt = (
             "You are a workflow planner for ZYRAA. Convert the user request into valid JSON only.\n"
             "Return keys: project, board, issues, email.\n"
@@ -38,8 +33,10 @@ def _build_plan_with_langchain(prompt: str) -> dict[str, Any] | None:
             "If the prompt asks for an Epic, Story, and Task chain, return three separate items in issues in the requested order.\n\n"
             f"User request:\n{prompt}"
         )
-        response = llm.invoke(structured_prompt)
-        content = response.content if hasattr(response, "content") else str(response)
+        content, _ = await generate_response(
+            prompt=structured_prompt,
+            system="Return only valid JSON. Do not wrap the response in markdown.",
+        )
         plan = json.loads(content)
         return _normalize_plan(plan)
     except Exception:

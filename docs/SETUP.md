@@ -81,6 +81,9 @@ D:\Jira\
    DATABASE_PASSWORD=YourStrong@Passw0rd
    SECRET_KEY=change-this-to-a-random-32+char-string
    FRONTEND_URL=http://localhost:3000
+   NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+   NVIDIA_API_KEY=your-nvidia-api-key
+   NIM_MODEL=moonshotai/kimi-k2.6
    ```
 
    **Important**: Change `SECRET_KEY` to a secure random string in production!

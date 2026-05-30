@@ -16,7 +16,7 @@ from app.services.agent_service import (
 )
 from app.services.email_service import email_is_configured
 from app.services.langchain_service import langchain_available
-from app.services.ollama_service import choose_best_model, get_installed_models
+from app.services.nim_service import choose_best_model, get_available_models, nim_is_configured
 from app.services.code_analyzer import review_repository_from_github
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -47,11 +47,12 @@ class RepositoryReviewRequest(BaseModel):
 def agent_status(current_user: User = Depends(get_current_user)) -> dict:
     model = choose_best_model()
     return {
-        "ollama_available": model is not None,
+        "nim_available": nim_is_configured(),
         "selected_model": model,
-        "installed_models": get_installed_models() or [],
-        "mode": "ollama-assisted" if model else "rule-based-fallback",
+        "available_models": get_available_models() or [],
+        "mode": "nim-assisted" if model else "rule-based-fallback",
         "langchain_available": langchain_available(),
+        "ai_planner_available": langchain_available(),
         "langgraph_available": langgraph_available(),
         "email_configured": email_is_configured(),
         "user": current_user.username,

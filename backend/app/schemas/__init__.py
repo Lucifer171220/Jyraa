@@ -388,10 +388,12 @@ class PRCreate(BaseModel):
 
 
 class AgentStatusResponse(BaseModel):
-    ollama_available: bool
+    nim_available: bool
     selected_model: Optional[str]
-    installed_models: List[str]
+    available_models: List[str]
     mode: str
+    langchain_available: bool = False
+    ai_planner_available: bool = False
 
 
 class AgentActionResponse(BaseModel):

@@ -1,34 +1,41 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
     """Application settings"""
 
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8")
+
     # Database
-    database_server: str = "mssql+pyodbc://@localhost\SQLEXPRESS02/JiraDB?driver=ODBC+Driver+18+for+SQL+Server&trusted_connection=yes&TrustServerCertificate=yes"
+    database_server: str
 
     # JWT
-    secret_key: str = "your-secret-key-change-in-production-minimum-32-characters"
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
+    secret_key: str
+    algorithm: str
+    access_token_expire_minutes: int
 
     # CORS
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str
 
-    # Ollama
-    ollama_base_url: str = "http://127.0.0.1:11434"
+    # NVIDIA NIM / OpenAI-compatible inference endpoint
+    nim_base_url: Optional[str] = None
+    nim_api_key: Optional[str] = None
+    nvidia_api_key: Optional[str] = None
+    nim_model: Optional[str] = None
+    nim_embedding_model: Optional[str] = None
 
     # SMTP / Gmail automation
-    smtp_host: str = "smtp.gmail.com"
-    smtp_port: int = 587
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_sender_email: Optional[str] = None
-    smtp_use_tls: bool = True
-
-    class Config:
-        env_file = ".env"
-
+    smtp_use_tls: bool = False
 
 settings = Settings()

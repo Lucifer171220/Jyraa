@@ -1,29 +1,49 @@
 # PR Title
-Add agent repository review workflow and expand agent control center
+Replace Ollama with NVIDIA NIM and improve repository security reports
 
 ## Summary
-- add a backend repository review endpoint under `/agents/repository/review`
-- introduce rule-based repository analysis for GitHub repos, including language-aware scoring, security checks, semantic findings, and AI-assisted summaries
-- extend the frontend agent page with a repository review form and result rendering
-- expose the new repository review API through the shared frontend API client
+- replace the Ollama integration with LangChain + NVIDIA NIM model support
+- move runtime configuration to `.env` and keep committed examples safe
+- make GitHub repository evaluation stricter with SAST-style findings, risk-weighted scoring, project-structure analysis, and dependency vulnerability checks
+- improve the frontend agents page so repository reviews and agent responses render as readable reports instead of plain JSON
 
 ## What Changed
-- added `RepositoryReviewRequest` and a new `/agents/repository/review` route in the backend
-- expanded `code_analyzer.py` to fetch repository contents from GitHub, analyze text files across multiple languages, score syntax/implementation/security quality, and summarize findings
-- added `code_review_rules.py` to centralize file-extension, generated-file, ignore-path, score-policy, and `.gitignore` suggestion rules
-- updated the agents UI so users can submit a repository URL, optional branch, optional token, and max file count for analysis
-- updated the frontend API layer with `agentAPI.reviewRepository(...)`
+- Added a NIM service backed by `langchain_nvidia_ai_endpoints.ChatNVIDIA`.
+- Updated agent status and automation flows to report NIM availability, selected model, LangChain availability, and LangGraph availability.
+- Removed the old Ollama service and dependency.
+- Updated backend settings to load required values from `backend/.env`.
+- Sanitized `.env.example` so secrets are not committed.
+- Expanded repository analysis with stricter vulnerability rules, .NET-aware checks, project-structure warnings, NuGet dependency parsing, OSV lookups, and weighted scoring that penalizes high-risk findings more heavily.
+- Added repository-level `risk_summary` and `score_explanation` fields to make scan results easier to interpret.
+- Updated the frontend agents UI with structured renderers for repository reviews, workflow responses, prompt automation output, metrics, findings tables, and collapsible raw JSON.
+- Updated README/setup docs with the NIM configuration flow.
 
-## Why
-This change turns the agent area into a broader operational tool. In addition to automation and prompt execution, users can now run repository-level reviews against GitHub projects and get structured findings, scores, and next-step guidance from the same interface.
+## Security Notes
+- `backend/.env` should remain local and must not be committed.
+- The committed env example now uses placeholders only.
+- If any real NVIDIA/NIM API key was previously committed or shared, rotate it before merging.
+- The repository evaluator is now intentionally stricter: scores are heuristic SAST-style risk indicators, not a compiler-grade proof of correctness.
 
-## Testing
-- not verified in this workspace because the repository git metadata is unavailable here
-- recommended manual checks:
-  - call `POST /api/v1/agents/repository/review` with a public GitHub repository URL
-  - verify the agent page submits repository review requests and renders the JSON response
-  - confirm private repository access works when a valid GitHub token is provided
+## Verification
+- `.\.venv\Scripts\python.exe -m pip install -r requirements.txt` passed.
+- `.\.venv\Scripts\python.exe -m compileall app` passed.
+- `npm run type-check` passed.
+- Live repository review against `https://github.com/Lucifer171220/LoginRegister` completed and now produces strict low scores with high/medium findings instead of inflated scores.
 
-## Notes
-- the backend review flow depends on outbound GitHub access and `httpx` availability
-- AI summaries fall back to plain-text output if the model response is not valid JSON
+## Known Local Check Blockers
+- `npm run build` could not complete locally because an existing Node process was locking `frontend\.next\trace`.
+- Browser verification could not be completed because the in-app browser tool was unavailable in this session.
+
+## Reviewer Notes
+- Required backend env values:
+  - `DATABASE_SERVER`
+  - `SECRET_KEY`
+  - `ALGORITHM`
+  - `ACCESS_TOKEN_EXPIRE_MINUTES`
+  - `FRONTEND_URL`
+  - `NVIDIA_API_KEY` or `NIM_API_KEY`
+  - `NIM_MODEL`
+- Optional backend env values:
+  - `NIM_BASE_URL`
+  - `NIM_EMBEDDING_MODEL`
+  - SMTP settings for email features
