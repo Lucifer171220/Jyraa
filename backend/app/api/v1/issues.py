@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud, schemas
+from app.api.v1.access_control import require_project_permission
 from app.api.v1.dependencies import get_current_user
 from app.database import get_db
 from app.models import (
@@ -195,6 +196,7 @@ def create_issue(
     project = crud.project.get_by_key(db, project_key=issue.project_key)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    require_project_permission(db, current_user, project.project_id, "issue.create")
 
     issue_type = db.query(IssueType).filter(IssueType.name == issue.issue_type.value).first()
     if not issue_type:
@@ -404,6 +406,7 @@ def update_issue(
     db_issue = crud.issue.get(db, issue_id)
     if db_issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+    require_project_permission(db, current_user, db_issue.project_id, "issue.update")
 
     old_assignee_user_id = db_issue.assignee_user_id
     update_data = issue_update.model_dump(exclude_unset=True)
@@ -416,6 +419,7 @@ def update_issue(
             if not project:
                 raise HTTPException(status_code=400, detail="Project not found")
             if project.project_id != db_issue.project_id:
+                require_project_permission(db, current_user, project.project_id, "issue.create")
                 target_project_id = project.project_id
                 db_issue.project_id = project.project_id
                 db_issue.issue_key = generate_issue_key(db, project.project_key, project.project_id)
@@ -497,6 +501,7 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db), current_user: Use
     db_issue = crud.issue.get(db, issue_id)
     if db_issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+    require_project_permission(db, current_user, db_issue.project_id, "issue.delete")
     db.delete(db_issue)
     db.commit()
     write_audit(db, current_user, "delete", "issue", issue_id, {"issue_id": issue_id})
@@ -610,10 +615,12 @@ def create_issue_link(
     db_issue = crud.issue.get(db, issue_id)
     if db_issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+    require_project_permission(db, current_user, db_issue.project_id, "issue.update")
 
     linked_issue = crud.issue.get_by_key(db, issue_key=link.issue_key_to)
     if not linked_issue:
         raise HTTPException(status_code=404, detail="Linked issue not found")
+    require_project_permission(db, current_user, linked_issue.project_id, "issue.update")
 
     link_obj = IssueLink(issue_id_from=issue_id, issue_id_to=linked_issue.issue_id, link_type=link.link_type)
     db.add(link_obj)
@@ -648,6 +655,7 @@ def update_issue_epic(
     )
     if db_issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+    require_project_permission(db, current_user, db_issue.project_id, "issue.update")
 
     epic = None
     if epic_update.epic_issue_key:
@@ -659,6 +667,7 @@ def update_issue_epic(
         )
         if epic is None:
             raise HTTPException(status_code=404, detail="Epic not found")
+        require_project_permission(db, current_user, epic.project_id, "project.read")
         validate_epic_assignment(db_issue, epic)
 
     replace_parent_epic_link(db, db_issue, epic)
@@ -677,6 +686,7 @@ def link_pull_request(
     issue = crud.issue.get(db, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    require_project_permission(db, current_user, issue.project_id, "issue.update")
 
     pr = PullRequest(
         issue_id=issue_id,

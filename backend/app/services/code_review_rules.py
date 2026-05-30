@@ -63,6 +63,7 @@ LANGUAGE_BY_EXTENSION = {
     ".yml": "YAML",
     ".toml": "TOML",
     ".xml": "XML",
+    ".md": "Markdown",
     ".csproj": ".NET Project",
     ".fsproj": ".NET Project",
     ".sln": ".NET Solution",

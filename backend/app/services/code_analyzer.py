@@ -239,7 +239,7 @@ def create_bugs_from_findings(db: Session, pr_id: int, findings: List[Dict], iss
 
 def _analyze_file(file_path: str, content: str) -> List[Dict]:
     findings: List[Dict] = []
-    all_rules = {**SECURITY_REVIEW_RULES, **QUALITY_REVIEW_RULES}
+    all_rules = _rules_for_file(file_path)
     for rule_id, rule in all_rules.items():
         for match in re.finditer(rule["pattern"], content, re.IGNORECASE):
             line = content[: match.start()].count("\n") + 1
@@ -273,6 +273,13 @@ def _score_to_percent(value: float) -> float:
 def _detect_language(file_path: str) -> str:
     _, extension = os.path.splitext(file_path.lower())
     return LANGUAGE_BY_EXTENSION.get(extension, "Unknown")
+
+
+def _rules_for_file(file_path: str) -> Dict[str, Dict[str, str]]:
+    rules = {**SECURITY_REVIEW_RULES, **QUALITY_REVIEW_RULES}
+    if _detect_language(file_path) in {"Markdown", "Unknown"}:
+        return {rule_id: rule for rule_id, rule in rules.items() if rule_id != "command_injection"}
+    return rules
 
 
 def _normalized_path(file_path: str) -> str:
@@ -911,6 +918,14 @@ def _route_lacks_ownership_check(function_node: ast.FunctionDef | ast.AsyncFunct
     if "current_user" not in param_names:
         return False
 
+    route_decorators = [ast.unparse(decorator) for decorator in function_node.decorator_list]
+    if not any(
+        method in decorator
+        for decorator in route_decorators
+        for method in (".post(", ".put(", ".patch(", ".delete(")
+    ):
+        return False
+
     source = ast.unparse(function_node)
     mutating_markers = ("db.commit()", ".status =", ".user_id =", ".assignee_user_id =", ".delete(", ".update(")
     if not any(marker in source for marker in mutating_markers):
@@ -929,6 +944,12 @@ def _route_lacks_ownership_check(function_node: ast.FunctionDef | ast.AsyncFunct
         ".owner_id",
         ".user_id !=",
         ".user_id ==",
+        "require_action_owner",
+        "require_project_access",
+        "require_project_permission",
+        "_authorized_issues",
+        "has_user_permission",
+        "check_project_access",
     )
     if any(marker in source for marker in ownership_markers):
         return False
@@ -1492,7 +1513,7 @@ def _compute_security_score(file_path: str, content: str, findings: List[Dict[st
 
 def _file_review(file_path: str, content: str, context: PythonReviewContext | None = None) -> Dict[str, Any]:
     findings: List[Dict[str, Any]] = []
-    for rule_id, rule in {**SECURITY_REVIEW_RULES, **QUALITY_REVIEW_RULES}.items():
+    for rule_id, rule in _rules_for_file(file_path).items():
         flags = re.IGNORECASE | re.MULTILINE
         for match in re.finditer(rule["pattern"], content, flags):
             line = content[: match.start()].count("\n") + 1

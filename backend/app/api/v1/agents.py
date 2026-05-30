@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.v1.access_control import require_action_owner
 from app.api.v1.dependencies import get_current_user, get_db
 from app.models import AgentAction, AgentActionStatus, User
 from app.services.agent_service import (
@@ -116,6 +117,7 @@ def approve_action(
     action = db.query(AgentAction).filter(AgentAction.id == action_id).first()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    require_action_owner(action, current_user)
     if action.status != AgentActionStatus.PENDING.value:
         raise HTTPException(status_code=400, detail="Action already decided")
 
@@ -138,6 +140,7 @@ def reject_action(
     action = db.query(AgentAction).filter(AgentAction.id == action_id).first()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    require_action_owner(action, current_user)
     if action.status != AgentActionStatus.PENDING.value:
         raise HTTPException(status_code=400, detail="Action already decided")
 

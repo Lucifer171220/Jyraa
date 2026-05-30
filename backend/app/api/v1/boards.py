@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud, schemas
+from app.api.v1.access_control import require_project_access, require_project_permission
 from app.api.v1.dependencies import get_current_user
 from app.database import get_db
 from app.models import Board, BoardColumn, Issue, IssueStatus, Sprint, User
@@ -20,6 +21,7 @@ def create_board(
     project = crud.project.get_by_key(db, project_key=board.project_key)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    require_project_permission(db, current_user, project.project_id, "project.admin")
 
     db_board = Board(
         project_id=project.project_id,
@@ -44,6 +46,7 @@ def read_project_boards(
     project = crud.project.get(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    require_project_access(db, current_user, project_id)
     return crud.board.get_by_project(db, project_id=project_id, skip=skip, limit=limit)
 
 
@@ -52,6 +55,7 @@ def read_board(board_id: int, db: Session = Depends(get_db), current_user: User 
     db_board = crud.board.get(db, board_id)
     if db_board is None:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_access(db, current_user, db_board.project_id)
     return db_board
 
 
@@ -65,6 +69,7 @@ def update_board(
     db_board = crud.board.get(db, board_id)
     if db_board is None:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_permission(db, current_user, db_board.project_id, "project.admin")
     return crud.board.update(db, db_obj=db_board, obj_in=board_update)
 
 
@@ -78,6 +83,7 @@ def create_board_column(
     db_board = crud.board.get(db, board_id)
     if not db_board:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_permission(db, current_user, db_board.project_id, "project.admin")
 
     mapped_status = None
     if column.mapped_status_name:
@@ -108,6 +114,7 @@ def read_board_columns(
     db_board = crud.board.get(db, board_id)
     if not db_board:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_access(db, current_user, db_board.project_id)
     return (
         db.query(BoardColumn)
         .options(joinedload(BoardColumn.mapped_status))
@@ -122,6 +129,7 @@ def read_board_issues(board_id: int, db: Session = Depends(get_db), current_user
     db_board = crud.board.get(db, board_id)
     if not db_board:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_access(db, current_user, db_board.project_id)
 
     columns = (
         db.query(BoardColumn)
@@ -188,6 +196,7 @@ def read_board_sprints(
     db_board = crud.board.get(db, board_id)
     if not db_board:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_access(db, current_user, db_board.project_id)
     sprints = db.query(Sprint).filter(Sprint.board_id == board_id).order_by(Sprint.start_date.desc()).all()
     return [serialize_sprint(sprint) for sprint in sprints]
 
@@ -202,6 +211,7 @@ def create_sprint(
     db_board = crud.board.get(db, board_id)
     if not db_board:
         raise HTTPException(status_code=404, detail="Board not found")
+    require_project_permission(db, current_user, db_board.project_id, "sprint.manage")
     db_sprint = Sprint(
         board_id=board_id,
         name=sprint.name,
@@ -226,9 +236,12 @@ def add_issues_to_sprint(
     sprint = db.query(Sprint).filter(Sprint.sprint_id == sprint_id).first()
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    require_project_permission(db, current_user, sprint.board.project_id, "sprint.manage")
     issue_ids = payload.get("issue_ids", [])
     issues = db.query(Issue).filter(Issue.issue_id.in_(issue_ids)).all() if issue_ids else []
     for issue in issues:
+        if issue.project_id != sprint.board.project_id:
+            raise HTTPException(status_code=400, detail=f"Issue {issue.issue_key} does not belong to sprint project")
         if issue not in sprint.issues:
             sprint.issues.append(issue)
     db.commit()
@@ -245,6 +258,7 @@ def get_sprint_capacity(
     sprint = db.query(Sprint).filter(Sprint.sprint_id == sprint_id).first()
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    require_project_access(db, current_user, sprint.board.project_id)
     by_assignee = {}
     for issue in sprint.issues:
         assignee = issue.assignee.display_name if issue.assignee else "Unassigned"
